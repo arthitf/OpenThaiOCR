@@ -280,8 +280,10 @@ class Cancelled(Exception):
 def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: set[str],
               dpi: int = 200, use_text_layer: bool = True, workers: int = 2,
               log=print, progress=lambda done, total: None, stop_flag=lambda: False,
-              engine_factory=None):
+              engine_factory=None, on_result=None):
     """
+    on_result(src_path, pages): เรียกทุกครั้งที่อ่านจบ 1 ไฟล์ (ใช้แสดงข้อความในหน้าต่าง)
+    formats ว่างได้ = อ่านอย่างเดียว ไม่บันทึกไฟล์
     out_mode: 'beside' = โฟลเดอร์ OCR_output ข้างไฟล์ต้นฉบับ, 'folder' = ใช้ out_dir
     formats: {'pdf','txt','docx'}
     engine_factory: ใช้ตอนทดสอบเท่านั้น (แทนการโหลดโมเดลจริง)
@@ -317,8 +319,14 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
         m = meta[fid]
         pages = [m["pages"][i] for i in range(m["n"])]
         src: Path = m["path"]
+        if on_result:
+            try:
+                on_result(src, pages)
+            except Exception:  # noqa: BLE001
+                pass
         dest = (src.parent / "OCR_output") if out_mode == "beside" else out_dir
-        dest.mkdir(parents=True, exist_ok=True)
+        if formats:
+            dest.mkdir(parents=True, exist_ok=True)
         stem = src.stem
         errs = [p for p in pages if p["error"]]
         for p in errs:
@@ -360,7 +368,7 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
         if engine_factory:
             global _OCR
             _OCR = engine_factory()
-        else:
+        elif _OCR is None:
             init_worker(mdir, threads=max(1, min(4, os.cpu_count() or 1)))
         for j in jobs:
             if stop_flag():
@@ -384,3 +392,14 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
                     fu.cancel()
                 raise
     return outputs
+
+
+# ---------------------------------------------------------------- อ่านภาพเดี่ยว (คลิปบอร์ด)
+def ocr_image(img: Image.Image) -> dict:
+    """อ่านภาพ PIL 1 ภาพใน process หลัก (ใช้กับภาพหน้าจอที่วางจากคลิปบอร์ด)"""
+    if _OCR is None:
+        init_worker(str(model_dir()), threads=max(1, min(4, os.cpu_count() or 1)))
+    r = _OCR.read(img.convert("RGB"))
+    return {"index": 0, "source": "ocr", "text": r.get("text", ""), "error": None,
+            "lines": [{"text": ln["text"], "confidence": float(ln.get("confidence", 0)),
+                       "box": ln["box"]} for ln in r.get("lines", []) if ln.get("text")]}

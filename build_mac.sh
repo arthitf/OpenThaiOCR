@@ -47,6 +47,7 @@ echo "[4/4] กำลังสร้าง .app..."
   --hidden-import runtime.thai_norm \
   --hidden-import onnxruntime \
   --collect-data docx \
+  --collect-all tkinterdnd2 \
   --exclude-module openvino --exclude-module torch --exclude-module matplotlib \
   --exclude-module pandas --exclude-module scipy --exclude-module IPython \
   --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module PySide6 \
