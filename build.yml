@@ -1,0 +1,39 @@
+# สร้างโปรแกรมบนคลาวด์ของ GitHub ทั้ง Windows และ Mac ชิป M
+# วิธีใช้: แท็บ Actions > Build OpenThai OCR > Run workflow
+# เสร็จแล้วโหลดไฟล์ zip จากหัวข้อ Artifacts ด้านล่างของหน้าผลการรัน
+name: Build OpenThai OCR
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        shell: cmd
+        run: build.bat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenThaiOCR_win
+          path: dist/OpenThaiOCR_win.zip
+
+  mac-apple-silicon:
+    runs-on: macos-14   # เครื่อง Mac ชิป M (arm64)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: bash build_mac.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenThaiOCR_mac
+          path: dist/OpenThaiOCR_mac.zip
