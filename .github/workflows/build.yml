@@ -1,6 +1,6 @@
 # สร้างโปรแกรมบนคลาวด์ของ GitHub ทั้ง Windows และ Mac ชิป M
 # วิธีใช้: แท็บ Actions > Build OpenThai OCR > Run workflow
-# เสร็จแล้วโหลดไฟล์ zip จากหัวข้อ Artifacts ด้านล่างของหน้าผลการรัน
+# เสร็จแล้วโหลดไฟล์จากหัวข้อ Artifacts ด้านล่างของหน้าผลการรัน
 name: Build OpenThai OCR
 
 on:
@@ -16,13 +16,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
       - name: Build
         shell: cmd
         run: build.bat
       - uses: actions/upload-artifact@v4
         with:
+          name: OpenThaiOCR_Setup_win
+          path: dist/OpenThaiOCR_Setup_*.exe
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
           name: OpenThaiOCR_win
           path: dist/OpenThaiOCR_win.zip
+          compression-level: 0
 
   mac-apple-silicon:
     runs-on: macos-latest   # เครื่อง Mac ชิป M (arm64)
@@ -35,5 +45,6 @@ jobs:
         run: bash build_mac.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: OpenThaiOCR_mac
-          path: dist/OpenThaiOCR_mac.zip
+          name: OpenThaiOCR_mac_dmg
+          path: dist/OpenThaiOCR_mac.dmg
+          compression-level: 0
