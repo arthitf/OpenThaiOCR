@@ -81,6 +81,24 @@ def _box(ln):
 
 
 # ---------------------------------------------------------------- หาเส้นตารางจากภาพ
+def _line_positions(m: np.ndarray, span: int, axis: int) -> list[float]:
+    """หาตำแหน่งเส้นในกรอบตาราง ทนกับภาพถ่ายที่เส้นเอียงเล็กน้อย
+    axis=0: เส้นแนวนอน (คืนค่า y), axis=1: เส้นแนวตั้ง (คืนค่า x)"""
+    import cv2
+
+    # เส้นเอียงจะขาดเป็นขั้นบันได: ขยายตั้งฉากกับเส้นนิดหน่อยให้ต่อกันเป็นชิ้นเดียว
+    k = np.ones((7, 1) if axis == 0 else (1, 7), np.uint8)
+    mm = cv2.dilate((m > 0).astype(np.uint8), k)
+    n, _lab, stats, cent = cv2.connectedComponentsWithStats(mm, connectivity=8)
+    pos = []
+    for i in range(1, n):
+        length = stats[i, cv2.CC_STAT_WIDTH] if axis == 0 else stats[i, cv2.CC_STAT_HEIGHT]
+        thick = stats[i, cv2.CC_STAT_HEIGHT] if axis == 0 else stats[i, cv2.CC_STAT_WIDTH]
+        if length > 0.25 * span and thick < max(40, 0.06 * length):
+            pos.append(cent[i][1] if axis == 0 else cent[i][0])
+    return _cluster(np.array(sorted(pos)), gap=12) if pos else []
+
+
 def detect_grids(img) -> list[dict]:
     """คืน [{"bbox": (x0,y0,x1,y1), "xs": [...], "ys": [...]}] พิกัดพิกเซล"""
     import cv2
@@ -102,10 +120,8 @@ def detect_grids(img) -> list[dict]:
             continue
         if w < W * 0.15 or h < H * 0.02:
             continue
-        hz = horiz[y:y + h, x:x + w] > 0
-        vt = vert[y:y + h, x:x + w] > 0
-        ys = _cluster(np.where(hz.sum(axis=1) > 0.25 * w)[0])
-        xs = _cluster(np.where(vt.sum(axis=0) > 0.25 * h)[0])
+        ys = _line_positions(horiz[y:y + h, x:x + w], w, axis=0)
+        xs = _line_positions(vert[y:y + h, x:x + w], h, axis=1)
         ys = [y + v for v in ys]
         xs = [x + v for v in xs]
         # เติมขอบที่ไม่มีเส้น (ตารางเปิดข้าง)
@@ -117,8 +133,11 @@ def detect_grids(img) -> list[dict]:
             ys = [float(y)] + ys
         if ys[-1] < y + h - 8:
             ys = ys + [float(y + h)]
-        if len(ys) < 3 and len(xs) < 3:
-            continue  # กรอบสี่เหลี่ยมเปล่า ไม่ใช่ตาราง
+        if len(ys) < 3:
+            continue  # กรอบสี่เหลี่ยม/แถวเดียว ไม่ใช่ตาราง
+        edges = (x <= 6) + (y <= 6) + (x + w >= W - 6) + (y + h >= H - 6)
+        if edges >= 2:
+            continue  # ขอบกระดาษ/เงาในภาพถ่าย ไม่ใช่ตาราง
         grids.append({"bbox": (x, y, x + w, y + h), "xs": xs, "ys": ys})
     # รวมเส้นแนวนอนที่ยาวใกล้เคียงกันและอยู่ห่างกันไม่มาก เป็นตารางแบบเปิด (มีแต่เส้นแนวนอน)
     hlines.sort(key=lambda t: t[1])

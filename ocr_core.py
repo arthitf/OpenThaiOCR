@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import math
 import os
+import re
 import sys
 import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -178,6 +179,38 @@ def _add_tables(res: dict, make_blocks):
 
 
 # ---------------------------------------------------------------- writers
+_XML_BAD = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
+
+
+def _xml(s) -> str:
+    """ตัดอักขระที่ Word/Excel ไม่รับ (ผล OCR จากภาพถ่ายบางครั้งมีอักขระควบคุมปนมา)"""
+    return _XML_BAD.sub("", s) if isinstance(s, str) else s
+
+
+def _emit(jobs, used: set, outputs: list, log, who: str) -> list[str]:
+    """เขียนผลทีละรูปแบบแยกกัน: รูปแบบหนึ่งพังไม่ทำให้รูปแบบอื่นหาย
+    jobs = [(ชื่อรูปแบบ, path, ฟังก์ชันเขียน(path) -> คืน False ถ้าไม่ได้สร้างไฟล์)]"""
+    made = []
+    for fmt, path, fn in jobs:
+        o = _unique(path, used)
+        try:
+            try:
+                ok = fn(o)
+            except PermissionError:  # ไฟล์ชื่อเดิมเปิดค้างอยู่ใน Word/Excel/PDF reader: บันทึกเป็นชื่อใหม่แทน
+                o2 = _unique(path.with_name(f"{path.stem} (ใหม่){path.suffix}"), used)
+                ok = fn(o2)
+                log(f"  ! {o.name} เปิดค้างอยู่ในโปรแกรมอื่น บันทึกเป็น {o2.name} แทน")
+                o = o2
+            if ok is not False:
+                outputs.append(o)
+                made.append(fmt)
+        except PermissionError:
+            log(f"  ✗ {who}: เขียน {fmt} ไม่ได้ (ไฟล์เปิดค้างอยู่ หรือโฟลเดอร์ไม่อนุญาตให้เขียน)")
+        except Exception as e:  # noqa: BLE001
+            log(f"  ✗ {who}: สร้าง {fmt} ไม่สำเร็จ ({type(e).__name__}: {e})")
+    return made
+
+
 def _unique(path: Path, used: set) -> Path:
     p, n = path, 2
     while str(p).lower() in used:  # กันชื่อชนกันในรอบเดียวกัน (ไฟล์จากรอบก่อนจะถูกเขียนทับ)
@@ -322,7 +355,7 @@ def write_docx(title: str, pages: list[dict], out: Path):
     normal.paragraph_format.line_spacing = 1.0
 
     p = doc.add_paragraph()
-    r = p.add_run(title)
+    r = p.add_run(_xml(title))
     r.bold = True
     set_font(r, 18)
 
@@ -330,30 +363,32 @@ def write_docx(title: str, pages: list[dict], out: Path):
         if i:
             doc.add_page_break()
         hp = doc.add_paragraph()
-        hr = hp.add_run(_label(pr))
+        hr = hp.add_run(_xml(_label(pr)))
         hr.bold = True
         set_font(hr, 16)
         if pr.get("blocks"):
             for b in pr["blocks"]:
                 if b["type"] == "text":
-                    doc.add_paragraph(b["text"])
+                    doc.add_paragraph(_xml(b["text"]))
                     continue
-                rows = b["rows"]
+                rows = [r for r in b.get("rows") or [] if r]
+                if not rows:
+                    continue
                 ncol = max(len(r) for r in rows)
                 tbl = doc.add_table(rows=len(rows), cols=ncol)
                 tbl.style = "Table Grid"
                 for ri, row in enumerate(rows):
                     for ci in range(ncol):
                         cell = tbl.cell(ri, ci)
-                        cell.text = row[ci] if ci < len(row) else ""
+                        cell.text = _xml(row[ci]) if ci < len(row) else ""
                         for para in cell.paragraphs:
                             for run in para.runs:
                                 set_font(run, 14)
                                 run.bold = ri == 0
                 doc.add_paragraph("")
         else:
-            for line in pr["text"].strip().split("\n"):
-                doc.add_paragraph(line)
+            for line in (pr.get("text") or "").strip().split("\n"):
+                doc.add_paragraph(_xml(line))
     doc.save(out)
 
 
@@ -392,6 +427,7 @@ def write_xlsx(title: str, pages: list[dict], out: Path) -> int:
             widths: dict[int, int] = {}
             for ri, row in enumerate(b["rows"], start=1):
                 for ci, val in enumerate(row, start=1):
+                    val = _xml(val)
                     v = _to_number(val) if ri > 1 else val
                     c = ws.cell(row=ri, column=ci, value=v)
                     c.font = Font(name="TH Sarabun New", size=14, bold=ri == 1)
@@ -407,7 +443,7 @@ def write_xlsx(title: str, pages: list[dict], out: Path) -> int:
                 ws.column_dimensions[get_column_letter(ci)].width = w
             ws.freeze_panes = "A2"
     if n:
-        wb.properties.title = title
+        wb.properties.title = _xml(title)
         wb.save(out)
     return n
 
@@ -487,31 +523,13 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
             log(f"✓ {src.name}: {m['n']} หน้า, ความมั่นใจเฉลี่ย {avg}, "
                 f"บรรทัดที่ควรตรวจ (<90%) {low} บรรทัด{note}{tab_note}")
             return
-        try:
-            if "pdf" in formats:
-                o = _unique(dest / f"{stem}_ocr.pdf", used)
-                write_searchable_pdf(src, m["kind"], pages, o, fontfile)
-                outputs.append(o)
-            if "txt" in formats:
-                o = _unique(dest / f"{stem}.txt", used)
-                write_txt(pages, o)
-                outputs.append(o)
-            if "docx" in formats:
-                o = _unique(dest / f"{stem}.docx", used)
-                write_docx(src.name, pages, o)
-                outputs.append(o)
-            n_tab = sum(1 for p in pages for b in p.get("blocks") or [] if b["type"] == "table")
-            if "xlsx" in formats and n_tab:
-                o = _unique(dest / f"{stem}_ตาราง.xlsx", used)
-                write_xlsx(src.name, pages, o)
-                outputs.append(o)
-            tab_note = f", พบตาราง {n_tab} ตาราง" if n_tab else ""
-            log(f"✓ {src.name}: {m['n']} หน้า, ความมั่นใจเฉลี่ย {avg}, "
-                f"บรรทัดที่ควรตรวจ (<90%) {low} บรรทัด{note}{tab_note}")
-        except PermissionError:
-            log(f"✗ {src.name}: เขียนไฟล์ผลลัพธ์ไม่ได้ (ไฟล์อาจเปิดค้างอยู่ใน Word/PDF reader)")
-        except Exception as e:  # noqa: BLE001
-            log(f"✗ {src.name}: บันทึกผลไม่สำเร็จ ({type(e).__name__}: {e})")
+        n_tab = sum(1 for p in pages for b in p.get("blocks") or [] if b["type"] == "table")
+        tab_note = f", พบตาราง {n_tab} ตาราง" if n_tab else ""
+        log(f"✓ {src.name}: {m['n']} หน้า, ความมั่นใจเฉลี่ย {avg}, "
+            f"บรรทัดที่ควรตรวจ (<90%) {low} บรรทัด{note}{tab_note}")
+        _emit(_jobs_for(formats, dest, stem, src.name, pages, n_tab, fontfile,
+                        pdf_fn=lambda o: write_searchable_pdf(src, m["kind"], pages, o, fontfile)),
+              used, outputs, log, src.name)
 
     def collect(res):
         m = meta[res["file_id"]]
@@ -576,29 +594,26 @@ def write_combined(meta, files, out_mode, out_dir, formats, fontfile, combine_na
             q["label"] = f"{m['path'].name} — หน้า {p['index'] + 1}" if m["n"] > 1 else m["path"].name
             q["gpage"] = g
             allpages.append(q)
-    try:
-        if "pdf" in formats:
-            o = _unique(dest / f"{stem}_ocr.pdf", used)
-            write_combined_pdf([(m["path"], m["kind"], m["done"]) for m in items], o, fontfile)
-            outputs.append(o)
-        if "txt" in formats:
-            o = _unique(dest / f"{stem}.txt", used)
-            write_txt(allpages, o)
-            outputs.append(o)
-        if "docx" in formats:
-            o = _unique(dest / f"{stem}.docx", used)
-            write_docx(stem, allpages, o)
-            outputs.append(o)
-        n_tab = sum(1 for p in allpages for b in p.get("blocks") or [] if b["type"] == "table")
-        if "xlsx" in formats and n_tab:
-            o = _unique(dest / f"{stem}_ตาราง.xlsx", used)
-            write_xlsx(stem, allpages, o)
-            outputs.append(o)
+    n_tab = sum(1 for p in allpages for b in p.get("blocks") or [] if b["type"] == "table")
+    made = _emit(_jobs_for(formats, dest, stem, stem, allpages, n_tab, fontfile,
+                           pdf_fn=lambda o: write_combined_pdf(
+                               [(m["path"], m["kind"], m["done"]) for m in items], o, fontfile)),
+                 used, outputs, log, "ไฟล์รวม")
+    if made:
         log(f"■ รวม {len(items)} ไฟล์ ({len(allpages)} หน้า) เป็นไฟล์เดียว: {stem} → {dest}")
-    except PermissionError:
-        log("✗ เขียนไฟล์รวมไม่ได้ (ไฟล์อาจเปิดค้างอยู่ใน Word/PDF reader)")
-    except Exception as e:  # noqa: BLE001
-        log(f"✗ บันทึกไฟล์รวมไม่สำเร็จ ({type(e).__name__}: {e})")
+
+
+def _jobs_for(formats, dest, stem, title, pages, n_tab, fontfile, pdf_fn):
+    jobs = []
+    if "pdf" in formats:
+        jobs.append(("PDF", dest / f"{stem}_ocr.pdf", pdf_fn))
+    if "txt" in formats:
+        jobs.append((".txt", dest / f"{stem}.txt", lambda o: write_txt(pages, o)))
+    if "docx" in formats:
+        jobs.append(("Word", dest / f"{stem}.docx", lambda o: write_docx(title, pages, o)))
+    if "xlsx" in formats and n_tab:
+        jobs.append(("Excel", dest / f"{stem}_ตาราง.xlsx", lambda o: write_xlsx(title, pages, o) > 0))
+    return jobs
 
 
 # ---------------------------------------------------------------- อ่านภาพเดี่ยว (คลิปบอร์ด)
