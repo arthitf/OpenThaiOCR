@@ -1,4 +1,4 @@
-# สร้างโปรแกรมบนคลาวด์ของ GitHub ทั้ง Windows และ Mac ชิป M
+# สร้างโปรแกรมบนคลาวด์ของ GitHub ทั้ง Windows, Mac ชิป M และ Linux
 # วิธีใช้: แท็บ Actions > Build OpenThai OCR > Run workflow
 # เสร็จแล้วโหลดไฟล์จากหัวข้อ Artifacts ด้านล่างของหน้าผลการรัน
 name: Build OpenThai OCR
@@ -47,4 +47,28 @@ jobs:
         with:
           name: OpenThaiOCR_mac_dmg
           path: dist/OpenThaiOCR_mac.dmg
+          compression-level: 0
+
+  linux:
+    runs-on: ubuntu-22.04   # glibc 2.35 — ใช้ได้กับ Ubuntu 22.04+ / Debian 12+ / Fedora 36+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tk8.6 libtk8.6 xvfb fonts-thai-tlwg
+      - name: Build
+        run: bash build_linux.sh
+      - name: Smoke test (open the app for 20s)
+        run: |
+          set +e
+          xvfb-run -a timeout 20 dist/OpenThaiOCR/OpenThaiOCR
+          code=$?
+          echo "exit code $code (124 = still running after 20s = OK)"
+          [ $code -eq 124 ]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenThaiOCR_linux_x64
+          path: dist/OpenThaiOCR_linux_x64.tar.gz
           compression-level: 0
