@@ -23,7 +23,7 @@ def main():
     import ocr_core
 
     APP = "OpenThai OCR"
-    VERSION = "1.5.1"
+    VERSION = "1.5.2"
     AUTHOR = "arthit.f"
     IS_MAC = sys.platform == "darwin"
     IS_LINUX = sys.platform.startswith("linux")

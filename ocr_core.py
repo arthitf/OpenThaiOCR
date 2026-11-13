@@ -481,6 +481,17 @@ def write_docx(title: str, pages: list[dict], out: Path):
         else:
             for line in (pr.get("text") or "").strip().split("\n"):
                 doc.add_paragraph(_xml(line))
+    # ต้นแบบของ python-docx ติดวันที่ปี 2013 และผู้เขียน "python-docx" มาด้วย
+    # Explorer เอาวันที่นี้ไปแสดง ทำให้ไฟล์ Word ไปอยู่ท้ายรายการเวลาเรียงตามวันที่
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0, tzinfo=None)
+    cp = doc.core_properties
+    cp.created = now
+    cp.modified = now
+    cp.author = "OpenThai OCR"
+    cp.last_modified_by = "OpenThai OCR"
+    cp.title = _xml(title)[:250]
+    cp.revision = 1
     doc.save(out)
 
 
