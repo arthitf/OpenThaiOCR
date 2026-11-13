@@ -528,7 +528,8 @@ class EditorTab:
     # ---------- แก้ข้อความเดิมในเอกสาร
     def page_lines(self):
         """บรรทัดข้อความเดิมของหน้า [(rect pt ที่มองเห็น, text, size, color)] จำไว้ต่อหน้า"""
-        key = (self.page, self.doc[self.page].rotation, id(self.doc))
+        import ocr_core as _oc
+        key = (self.page, self.doc[self.page].rotation, id(self.doc), _oc._LANG)
         cache = getattr(self, "_line_cache", {})
         if key in cache:
             return cache[key]

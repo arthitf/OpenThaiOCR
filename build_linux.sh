@@ -50,6 +50,8 @@ echo "[4/4] กำลังสร้างโปรแกรม..."
   --hidden-import PIL._tkinter_finder \
   --collect-data docx \
   --collect-all tkinterdnd2 \
+  --collect-data rapidocr --collect-submodules rapidocr \
+  --exclude-module paddle --exclude-module tensorrt --exclude-module MNN \
   --exclude-module openvino --exclude-module torch --exclude-module matplotlib \
   --exclude-module pandas --exclude-module scipy --exclude-module IPython \
   --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module PySide6 \

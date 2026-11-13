@@ -23,7 +23,7 @@ def main():
     import ocr_core
 
     APP = "OpenThai OCR"
-    VERSION = "1.4.2"
+    VERSION = "1.5.0"
     AUTHOR = "arthit.f"
     IS_MAC = sys.platform == "darwin"
     IS_LINUX = sys.platform.startswith("linux")
@@ -61,7 +61,7 @@ def main():
     footer = ttk.Frame(root)
     footer.pack(side="bottom", fill="x", padx=10, pady=(0, 6))
     ttk.Label(footer, text=f"พัฒนาโดย {AUTHOR}", foreground="#777").pack(side="left")
-    ttk.Label(footer, text=f"{APP} v{VERSION}  ·  โมเดล OCR: iApp Technology",
+    ttk.Label(footer, text=f"{APP} v{VERSION}  ·  โมเดล OCR: iApp Technology, PaddleOCR/RapidOCR",
               foreground="#999").pack(side="right")
 
     nb = ttk.Notebook(root)
@@ -227,6 +227,33 @@ def main():
     v_workers = tk.IntVar(value=max(1, min(4, ncpu // 2)))
     ttk.Spinbox(ra, from_=1, to=max(1, ncpu), textvariable=v_workers, width=4).pack(side="left", padx=4)
     ttk.Label(ra, text="core", foreground="#555").pack(side="left")
+    rl = ttk.Frame(f_adv)
+    rl.pack(fill="x", padx=8, pady=(0, 4))
+    ttk.Label(rl, text="ภาษาในเอกสาร:").pack(side="left")
+    lang_names = list(ocr_core.LANGS.values())
+    lang_keys = list(ocr_core.LANGS.keys())
+    v_lang = tk.StringVar(value=lang_names[0])
+    cb_lang = ttk.Combobox(rl, textvariable=v_lang, values=lang_names, width=58, state="readonly")
+    cb_lang.pack(side="left", padx=4)
+    lbl_lang = ttk.Label(rl, text="", foreground="#555")
+    lbl_lang.pack(side="left")
+
+    def cur_lang():
+        try:
+            return lang_keys[lang_names.index(v_lang.get())]
+        except ValueError:
+            return "th"
+
+    def on_lang(*_):
+        lg = cur_lang()
+        ocr_core.set_language(lg)  # ใช้กับภาพจากคลิปบอร์ดและหน้าแก้ไขด้วย
+        if lg == "latin":
+            lbl_lang.config(text="(ใช้กับคลิปบอร์ด/หน้าแก้ไขด้วย)" if ocr_core.lang_available("latin")
+                            else "⚠ ไม่พบโมเดลภาษาละตินในโปรแกรมนี้")
+        else:
+            lbl_lang.config(text="")
+    v_lang.trace_add("write", on_lang)
+
     v_tables = tk.BooleanVar(value=True)
     ttk.Checkbutton(f_adv, variable=v_tables,
                     text="หาตาราง: ทำเป็นตารางใน Word/Excel และคัดลอกไปวางใน Excel แล้วแยกช่องได้"
@@ -400,8 +427,8 @@ def main():
         if state["running"] or state["clip_busy"]:
             lbl_txt_status.config(text="กำลังประมวลผลอยู่ รอสักครู่แล้วลองใหม่")
             return "break"
-        if not (ocr_core.model_dir() / "rec.onnx").exists():
-            messagebox.showerror(APP, f"ไม่พบไฟล์โมเดลที่\n{ocr_core.model_dir()}")
+        if not ocr_core.lang_available(cur_lang()):
+            messagebox.showerror(APP, f"ไม่พบไฟล์โมเดลสำหรับภาษา \"{v_lang.get()}\"\n{ocr_core.model_dir()}")
             return "break"
         state["clip_busy"] = True
         nb.select(tab_txt)
@@ -558,8 +585,8 @@ def main():
                 messagebox.showwarning(APP, "กรุณาเลือกโฟลเดอร์เก็บผลลัพธ์")
                 return
             out_dir = Path(v_outdir.get().strip())
-        if not (ocr_core.model_dir() / "rec.onnx").exists():
-            messagebox.showerror(APP, f"ไม่พบไฟล์โมเดลที่\n{ocr_core.model_dir()}")
+        if not ocr_core.lang_available(cur_lang()):
+            messagebox.showerror(APP, f"ไม่พบไฟล์โมเดลสำหรับภาษา \"{v_lang.get()}\"\n{ocr_core.model_dir()}")
             return
         try:
             workers = max(1, int(v_workers.get()))
@@ -577,7 +604,8 @@ def main():
         args = dict(files=batch, out_mode=v_mode.get(), out_dir=out_dir, formats=formats,
                     dpi=int(v_dpi.get()), use_text_layer=v_textlayer.get(), workers=workers,
                     find_tables=v_tables.get(),
-                    combine=v_combine.get(), combine_name=v_cname.get().strip())
+                    combine=v_combine.get(), combine_name=v_cname.get().strip(),
+                    lang=cur_lang())
 
         def job():
             outputs = []
@@ -627,6 +655,63 @@ def main():
     root.mainloop()
 
 
+def selftest(out_path: str) -> int:
+    """ใช้ตอน build บน GitHub: สร้างภาพข้อความเยอรมัน/ดัตช์ และภาษาไทย แล้ว OCR ด้วยโมเดลที่ฝังมากับโปรแกรม
+    เปิดด้วยตัวแปรแวดล้อม OPENTHAIOCR_SELFTEST=<ไฟล์ผลลัพธ์>"""
+    import ocr_core
+    from PIL import Image, ImageDraw, ImageFont
+
+    lines = ["Größe der Straße: 12 Übungen", "Ärzte und Öffnungszeiten", "Bloeddruk normaal, geen klachten"]
+    font = None
+    for f in ("DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "arial.ttf",
+              "C:/Windows/Fonts/arial.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf"):
+        try:
+            font = ImageFont.truetype(f, 40)
+            break
+        except OSError:
+            continue
+    img = Image.new("RGB", (1400, 80 + 70 * len(lines)), "white")
+    d = ImageDraw.Draw(img)
+    for i, t in enumerate(lines):
+        d.text((40, 40 + 70 * i), t, fill="black", font=font or ImageFont.load_default())
+    report = []
+    ok = True
+    try:
+        r = ocr_core.ocr_image(img, lang="latin")
+        text = r["text"]
+        report.append(text)
+        for w in ("Größe", "Straße", "Übungen", "Ärzte", "Bloeddruk"):
+            hit = w in text
+            ok &= hit
+            report.append(f"{'OK ' if hit else 'MISS'} {w}")
+    except Exception as e:  # noqa: BLE001
+        ok = False
+        report.append(f"ERROR {type(e).__name__}: {e}\n{traceback.format_exc()}")
+    # โมเดลภาษาไทย (OpenThai) ที่ฝังมากับโปรแกรม
+    try:
+        tf = ocr_core.find_font()
+        tfont = ImageFont.truetype(tf, 44) if tf else None
+        th_lines = ["ทดสอบภาษาไทย 2569", "สำนักงานเขต 8 อุดรธานี"]
+        img = Image.new("RGB", (1400, 80 + 80 * len(th_lines)), "white")
+        d = ImageDraw.Draw(img)
+        for i, t in enumerate(th_lines):
+            d.text((40, 40 + 80 * i), t, fill="black", font=tfont or ImageFont.load_default())
+        r = ocr_core.ocr_image(img, lang="th")
+        report.append(f"--- th (font: {tf}) ---\n{r['text']}")
+        for w in ("ทดสอบ", "2569", "อุดรธานี"):
+            hit = w in r["text"].replace(" ", "")
+            ok &= hit
+            report.append(f"{'OK ' if hit else 'MISS'} {w}")
+    except Exception as e:  # noqa: BLE001
+        ok = False
+        report.append(f"ERROR th {type(e).__name__}: {e}\n{traceback.format_exc()}")
+    report.append("PASS" if ok else "FAIL")
+    Path(out_path).write_text("\n".join(report) + "\n", encoding="utf-8")
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()  # จำเป็นสำหรับ exe ที่ใช้หลาย process
+    if os.environ.get("OPENTHAIOCR_SELFTEST"):
+        sys.exit(selftest(os.environ["OPENTHAIOCR_SELFTEST"]))
     main()

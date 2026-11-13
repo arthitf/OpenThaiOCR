@@ -62,6 +62,11 @@ echo [4/4] กำลังสร้าง exe...
   --hidden-import pdf_editor ^
   --collect-data docx ^
   --collect-all tkinterdnd2 ^
+  --collect-data rapidocr ^
+  --collect-submodules rapidocr ^
+  --exclude-module paddle ^
+  --exclude-module tensorrt ^
+  --exclude-module MNN ^
   --exclude-module openvino ^
   --exclude-module torch ^
   --exclude-module matplotlib ^

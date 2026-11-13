@@ -97,19 +97,107 @@ def count_pages(path: Path) -> int:
 
 
 # ---------------------------------------------------------------- worker
-_OCR = None
+# ภาษาที่รองรับ: th = โมเดล OpenThai (ไทย+อังกฤษ), latin = RapidOCR/PP-OCRv6 (อักษรละติน)
+LANGS = {
+    "th": "ไทย (+อังกฤษ)",
+    "latin": "อังกฤษ / เยอรมัน / ดัตช์ / ฝรั่งเศส / สเปน / อิตาลี (อักษรละติน)",
+}
+_ENGINES: dict = {}  # ภาษา -> engine ที่โหลดแล้วใน process นี้
+_OCR = None  # ใช้ตอนทดสอบ (engine_factory) = engine ภาษาไทย
+_LANG = "th"  # ภาษาปัจจุบันสำหรับภาพจากคลิปบอร์ด/หน้าแก้ไข
 _LOCK = threading.Lock()  # กันหลาย thread เรียกโมเดลพร้อมกัน (เช่น OCR คลิปบอร์ด + หาข้อมูลส่วนบุคคล)
 
 
-def init_worker(mdir: str, threads: int = 1):
+def latin_model_dir() -> Path | None:
+    """โมเดล PP-OCRv6 ที่มากับแพ็กเกจ rapidocr (ไม่ต้องโหลดเพิ่ม ใช้ออฟไลน์ได้)"""
+    import importlib.util
+
+    spec = importlib.util.find_spec("rapidocr")
+    if not spec or not spec.origin:
+        return None
+    return Path(spec.origin).parent / "models"
+
+
+def lang_available(lang: str) -> bool:
+    if lang == "latin":
+        d = latin_model_dir()
+        return bool(d) and any(d.glob("*rec*.onnx")) and any(d.glob("*det*.onnx"))
+    return (model_dir() / "rec.onnx").exists()
+
+
+def set_language(lang: str):
+    global _LANG
+    _LANG = lang if lang in LANGS else "th"
+
+
+class LatinOCR:
+    """RapidOCR (PP-OCRv6 หลายภาษาที่มากับแพ็กเกจ) แปลงผลให้อยู่ในรูปแบบเดียวกับโมเดลไทย"""
+
+    def __init__(self, threads: int = 1):
+        from rapidocr import RapidOCR
+
+        self.eng = RapidOCR(params={
+            "Global.log_level": "error",
+            "Global.max_side_len": 4096,
+            "EngineConfig.onnxruntime.intra_op_num_threads": int(threads),
+            "EngineConfig.onnxruntime.inter_op_num_threads": 1,
+        })
+
+    def read(self, img: Image.Image) -> dict:
+        r = self.eng(img.convert("RGB"))
+        if r is None or r.boxes is None or r.txts is None:
+            return {"text": "", "lines": []}
+        lines = []
+        for box, txt, sc in zip(r.boxes, r.txts, r.scores):
+            t = (txt or "").strip()
+            if t:
+                lines.append({"text": t, "confidence": float(sc),
+                              "box": [[float(x), float(y)] for x, y in box]})
+        return {"text": _join_rows(lines), "lines": lines}
+
+
+def _join_rows(lines: list[dict]) -> str:
+    """เรียงกล่องข้อความเป็นบรรทัด: กล่องที่อยู่ระดับเดียวกันต่อกันด้วยช่องว่าง"""
+    items = []
+    for ln in lines:
+        ys = [p[1] for p in ln["box"]]
+        xs = [p[0] for p in ln["box"]]
+        items.append(((min(ys) + max(ys)) / 2, max(1.0, max(ys) - min(ys)), min(xs), ln["text"]))
+    items.sort()
+    rows: list[list] = []
+    for cy, h, x, t in items:
+        if rows and abs(cy - rows[-1][0]) < 0.5 * min(h, rows[-1][1]):
+            rows[-1][2].append((x, t))
+        else:
+            rows.append([cy, h, [(x, t)]])
+    return "\n".join(" ".join(t for _x, t in sorted(r[2])) for r in rows)
+
+
+def init_worker(mdir: str, threads: int = 1, lang: str = "th"):
     """โหลดโมเดลครั้งเดียวต่อ process"""
     global _OCR
+    if lang == "latin":
+        if not lang_available("latin"):
+            raise FileNotFoundError("ไม่พบโมเดลภาษาละติน (แพ็กเกจ rapidocr)")
+        _ENGINES["latin"] = LatinOCR(threads=threads)
+        return
     if mdir not in sys.path:
         sys.path.insert(0, mdir)  # ให้ import แพ็กเกจ runtime/ ที่มากับโมเดลได้
     from runtime.line_engine import LineOCR  # noqa: E402
 
     _OCR = LineOCR(mdir, threads=threads,
                    runtime={"backend": "onnxruntime", "precision": "fp32"})
+    _ENGINES["th"] = _OCR
+
+
+def _engine(lang: str):
+    if lang == "th" and _OCR is not None:
+        return _OCR
+    e = _ENGINES.get(lang)
+    if e is None:
+        init_worker(str(model_dir()), threads=max(1, min(4, os.cpu_count() or 1)), lang=lang)
+        e = _ENGINES.get(lang) if lang != "th" else _OCR
+    return e
 
 
 def _load_image_frame(path: str, index: int) -> tuple[Image.Image, float]:
@@ -150,7 +238,7 @@ def ocr_page(job: dict) -> dict:
             res["dpi"] = dpi
             res["size"] = img.size
         with _LOCK:
-            r = _OCR.read(img)
+            r = _engine(job.get("lang", "th")).read(img)
         res["text"] = r.get("text", "")
         res["lines"] = [{"text": ln["text"], "confidence": float(ln.get("confidence", 0)),
                          "box": ln["box"]} for ln in r.get("lines", []) if ln.get("text")]
@@ -457,7 +545,7 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
               dpi: int = 200, use_text_layer: bool = True, workers: int = 2,
               log=print, progress=lambda done, total: None, stop_flag=lambda: False,
               engine_factory=None, on_result=None, find_tables: bool = True,
-              combine: bool = False, combine_name: str = ""):
+              combine: bool = False, combine_name: str = "", lang: str = "th"):
     """
     on_result(src_path, pages): เรียกทุกครั้งที่อ่านจบ 1 ไฟล์ (ใช้แสดงข้อความในหน้าต่าง)
     formats ว่างได้ = อ่านอย่างเดียว ไม่บันทึกไฟล์
@@ -484,7 +572,7 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
         meta[fid] = {"path": f, "kind": kind, "n": n, "pages": {}}
         for i in range(n):
             jobs.append({"file_id": fid, "path": str(f), "kind": kind, "index": i,
-                         "dpi": dpi, "use_text_layer": use_text_layer,
+                         "dpi": dpi, "use_text_layer": use_text_layer, "lang": lang,
                          "tables": find_tables or "xlsx" in formats})
     total = len(jobs)
     if not total:
@@ -542,9 +630,12 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
     if workers <= 1 or total == 1:
         if engine_factory:
             global _OCR
-            _OCR = engine_factory()
-        elif _OCR is None:
-            init_worker(mdir, threads=max(1, min(4, os.cpu_count() or 1)))
+            if lang == "th":
+                _OCR = engine_factory()
+            else:
+                _ENGINES[lang] = engine_factory()
+        elif (lang == "th" and _OCR is None) or (lang != "th" and lang not in _ENGINES):
+            init_worker(mdir, threads=max(1, min(4, os.cpu_count() or 1)), lang=lang)
         for j in jobs:
             if stop_flag():
                 raise Cancelled()
@@ -553,7 +644,7 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
             progress(done, total)
     else:
         with ProcessPoolExecutor(max_workers=workers, initializer=init_worker,
-                                 initargs=(mdir, 1)) as ex:
+                                 initargs=(mdir, 1, lang)) as ex:
             futs = [ex.submit(ocr_page, j) for j in jobs]
             try:
                 for fu in as_completed(futs):
@@ -617,12 +708,10 @@ def _jobs_for(formats, dest, stem, title, pages, n_tab, fontfile, pdf_fn):
 
 
 # ---------------------------------------------------------------- อ่านภาพเดี่ยว (คลิปบอร์ด)
-def ocr_image(img: Image.Image) -> dict:
+def ocr_image(img: Image.Image, lang: str | None = None) -> dict:
     """อ่านภาพ PIL 1 ภาพใน process หลัก (ใช้กับภาพหน้าจอที่วางจากคลิปบอร์ด)"""
     with _LOCK:
-        if _OCR is None:
-            init_worker(str(model_dir()), threads=max(1, min(4, os.cpu_count() or 1)))
-        r = _OCR.read(img.convert("RGB"))
+        r = _engine(lang or _LANG).read(img.convert("RGB"))
     return {"index": 0, "source": "ocr", "text": r.get("text", ""), "error": None,
             "lines": [{"text": ln["text"], "confidence": float(ln.get("confidence", 0)),
                        "box": ln["box"]} for ln in r.get("lines", []) if ln.get("text")]}
