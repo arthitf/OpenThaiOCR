@@ -217,7 +217,7 @@ def _add_text_layer(page: pymupdf.Page, lines: list, scale: float, font: pymupdf
                          render_mode=3, morph=(base, mat))
 
 
-def write_searchable_pdf(src: Path, kind: str, pages: list[dict], out: Path, fontfile: str):
+def build_searchable_doc(src: Path, kind: str, pages: list[dict], fontfile: str) -> pymupdf.Document:
     font = pymupdf.Font(fontfile=fontfile)
     fontname = "ocrth"
     if kind == "pdf":
@@ -242,6 +242,10 @@ def write_searchable_pdf(src: Path, kind: str, pages: list[dict], out: Path, fon
             page.insert_image(page.rect, stream=buf.getvalue())
             if pr["lines"]:
                 _add_text_layer(page, pr["lines"], scale, font, fontname, fontfile)
+    return doc
+
+
+def _save_pdf(doc: pymupdf.Document, out: Path):
     try:
         doc.subset_fonts()
     except Exception:  # noqa: BLE001
@@ -250,10 +254,35 @@ def write_searchable_pdf(src: Path, kind: str, pages: list[dict], out: Path, fon
     doc.close()
 
 
+def write_searchable_pdf(src: Path, kind: str, pages: list[dict], out: Path, fontfile: str):
+    _save_pdf(build_searchable_doc(src, kind, pages, fontfile), out)
+
+
+def write_combined_pdf(items: list[tuple], out: Path, fontfile: str):
+    """items = [(src, kind, pages)] เรียงตามลำดับ รวมเป็น PDF เดียว พร้อมบุ๊กมาร์กชื่อไฟล์"""
+    big = pymupdf.open()
+    toc = []
+    for src, kind, pages in items:
+        start = big.page_count + 1
+        d = build_searchable_doc(src, kind, pages, fontfile)
+        big.insert_pdf(d)
+        d.close()
+        toc.append([1, Path(src).name, start])
+    try:
+        big.set_toc(toc)
+    except Exception:  # noqa: BLE001
+        pass
+    _save_pdf(big, out)
+
+
+def _label(pr: dict) -> str:
+    return pr.get("label") or f"หน้า {pr['index'] + 1}"
+
+
 def write_txt(pages: list[dict], out: Path):
     parts = []
     for pr in pages:
-        parts.append(f"===== หน้า {pr['index'] + 1} =====\n{pr['text'].strip()}")
+        parts.append(f"===== {_label(pr)} =====\n{pr['text'].strip()}")
     out.write_text("\n\n".join(parts) + "\n", encoding="utf-8-sig")
 
 
@@ -301,7 +330,7 @@ def write_docx(title: str, pages: list[dict], out: Path):
         if i:
             doc.add_page_break()
         hp = doc.add_paragraph()
-        hr = hp.add_run(f"หน้า {pr['index'] + 1}")
+        hr = hp.add_run(_label(pr))
         hr.bold = True
         set_font(hr, 16)
         if pr.get("blocks"):
@@ -359,7 +388,7 @@ def write_xlsx(title: str, pages: list[dict], out: Path) -> int:
                 continue
             n += 1
             k += 1
-            ws = wb.create_sheet(f"หน้า{pr['index'] + 1}-ตาราง{k}"[:31])
+            ws = wb.create_sheet(f"หน้า{pr.get('gpage', pr['index'] + 1)}-ตาราง{k}"[:31])
             widths: dict[int, int] = {}
             for ri, row in enumerate(b["rows"], start=1):
                 for ci, val in enumerate(row, start=1):
@@ -391,14 +420,17 @@ class Cancelled(Exception):
 def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: set[str],
               dpi: int = 200, use_text_layer: bool = True, workers: int = 2,
               log=print, progress=lambda done, total: None, stop_flag=lambda: False,
-              engine_factory=None, on_result=None, find_tables: bool = True):
+              engine_factory=None, on_result=None, find_tables: bool = True,
+              combine: bool = False, combine_name: str = ""):
     """
     on_result(src_path, pages): เรียกทุกครั้งที่อ่านจบ 1 ไฟล์ (ใช้แสดงข้อความในหน้าต่าง)
     formats ว่างได้ = อ่านอย่างเดียว ไม่บันทึกไฟล์
     out_mode: 'beside' = โฟลเดอร์ OCR_output ข้างไฟล์ต้นฉบับ, 'folder' = ใช้ out_dir
     formats: {'pdf','txt','docx'}
     engine_factory: ใช้ตอนทดสอบเท่านั้น (แทนการโหลดโมเดลจริง)
+    combine: รวมผลทุกไฟล์ (ตามลำดับในรายการ) เป็นไฟล์เดียวต่อรูปแบบ ตั้งชื่อด้วย combine_name
     """
+    combine = combine and len(files) > 1
     fontfile = find_font()
     if "pdf" in formats and not fontfile:
         log("⚠ ไม่พบฟอนต์ภาษาไทยในเครื่อง ข้ามการสร้าง PDF ค้นหาได้")
@@ -437,7 +469,7 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
             except Exception:  # noqa: BLE001
                 pass
         dest = (src.parent / "OCR_output") if out_mode == "beside" else out_dir
-        if formats:
+        if formats and not combine:
             dest.mkdir(parents=True, exist_ok=True)
         stem = src.stem
         errs = [p for p in pages if p["error"]]
@@ -448,6 +480,13 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
         n_text = sum(p["source"] == "text" for p in pages)
         note = f", ใช้ข้อความเดิมใน PDF {n_text} หน้า" if n_text else ""
         avg = f"{100 * sum(confs) / len(confs):.1f}%" if confs else "-"
+        if combine:  # เก็บไว้รวมตอนท้าย
+            m["done"] = pages
+            n_tab = sum(1 for p in pages for b in p.get("blocks") or [] if b["type"] == "table")
+            tab_note = f", พบตาราง {n_tab} ตาราง" if n_tab else ""
+            log(f"✓ {src.name}: {m['n']} หน้า, ความมั่นใจเฉลี่ย {avg}, "
+                f"บรรทัดที่ควรตรวจ (<90%) {low} บรรทัด{note}{tab_note}")
+            return
         try:
             if "pdf" in formats:
                 o = _unique(dest / f"{stem}_ocr.pdf", used)
@@ -509,7 +548,57 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
                 for fu in futs:
                     fu.cancel()
                 raise
+    if combine and formats:
+        write_combined(meta, files, out_mode, out_dir, formats, fontfile, combine_name, used, outputs, log)
     return outputs
+
+
+def _safe_name(name: str) -> str:
+    bad = '<>:"/\\|?*'
+    name = "".join("_" if c in bad or ord(c) < 32 else c for c in name).strip(" .")
+    return name[:120]
+
+
+def write_combined(meta, files, out_mode, out_dir, formats, fontfile, combine_name, used, outputs, log):
+    items = [meta[fid] for fid in sorted(meta) if "done" in meta[fid]]
+    if not items:
+        return
+    first: Path = items[0]["path"]
+    dest = (first.parent / "OCR_output") if out_mode == "beside" else out_dir
+    dest.mkdir(parents=True, exist_ok=True)
+    stem = _safe_name(combine_name) or f"รวม_{first.stem}_และอีก{len(items) - 1}ไฟล์"
+    # ใส่ป้ายชื่อไฟล์ให้แต่ละหน้า และเลขหน้ารวม (ใช้ตั้งชื่อชีต Excel)
+    allpages, g = [], 0
+    for m in items:
+        for p in m["done"]:
+            g += 1
+            q = dict(p)
+            q["label"] = f"{m['path'].name} — หน้า {p['index'] + 1}" if m["n"] > 1 else m["path"].name
+            q["gpage"] = g
+            allpages.append(q)
+    try:
+        if "pdf" in formats:
+            o = _unique(dest / f"{stem}_ocr.pdf", used)
+            write_combined_pdf([(m["path"], m["kind"], m["done"]) for m in items], o, fontfile)
+            outputs.append(o)
+        if "txt" in formats:
+            o = _unique(dest / f"{stem}.txt", used)
+            write_txt(allpages, o)
+            outputs.append(o)
+        if "docx" in formats:
+            o = _unique(dest / f"{stem}.docx", used)
+            write_docx(stem, allpages, o)
+            outputs.append(o)
+        n_tab = sum(1 for p in allpages for b in p.get("blocks") or [] if b["type"] == "table")
+        if "xlsx" in formats and n_tab:
+            o = _unique(dest / f"{stem}_ตาราง.xlsx", used)
+            write_xlsx(stem, allpages, o)
+            outputs.append(o)
+        log(f"■ รวม {len(items)} ไฟล์ ({len(allpages)} หน้า) เป็นไฟล์เดียว: {stem} → {dest}")
+    except PermissionError:
+        log("✗ เขียนไฟล์รวมไม่ได้ (ไฟล์อาจเปิดค้างอยู่ใน Word/PDF reader)")
+    except Exception as e:  # noqa: BLE001
+        log(f"✗ บันทึกไฟล์รวมไม่สำเร็จ ({type(e).__name__}: {e})")
 
 
 # ---------------------------------------------------------------- อ่านภาพเดี่ยว (คลิปบอร์ด)

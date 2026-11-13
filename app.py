@@ -23,7 +23,7 @@ def main():
     import ocr_core
 
     APP = "OpenThai OCR"
-    VERSION = "1.4.1"
+    VERSION = "1.4.2"
     AUTHOR = "arthit.f"
     IS_MAC = sys.platform == "darwin"
     IS_LINUX = sys.platform.startswith("linux")
@@ -138,9 +138,34 @@ def main():
         files.clear()
         refresh_list()
 
+    def move_sel(step):
+        sel = list(lst.curselection())
+        if not sel:
+            return
+        if step < 0 and sel[0] == 0 or step > 0 and sel[-1] == len(files) - 1:
+            return
+        for i in (sel if step < 0 else reversed(sel)):
+            files[i], files[i + step] = files[i + step], files[i]
+        refresh_list()
+        for i in sel:
+            lst.selection_set(i + step)
+        lst.see(sel[0] + step)
+
+    def sort_name():
+        import re as _re
+        def key(f):  # เรียงแบบธรรมชาติ: ภาพ2 มาก่อน ภาพ10
+            return [int(t) if t.isdigit() else t.lower() for t in _re.split(r"(\d+)", f.name)]
+        files.sort(key=key)
+        refresh_list()
+
     for txt, cmd in (("เพิ่มไฟล์...", pick_files), ("เพิ่มโฟลเดอร์...", pick_folder),
                      ("ลบที่เลือก", remove_sel), ("ล้างทั้งหมด", clear_all)):
         ttk.Button(btns, text=txt, command=cmd, width=16).pack(fill="x", pady=2)
+    mv = ttk.Frame(btns)
+    mv.pack(fill="x", pady=(8, 2))
+    ttk.Button(mv, text="▲ ขึ้น", width=7, command=lambda: move_sel(-1)).pack(side="left", expand=True, fill="x")
+    ttk.Button(mv, text="▼ ลง", width=7, command=lambda: move_sel(1)).pack(side="left", expand=True, fill="x")
+    ttk.Button(btns, text="เรียงตามชื่อ", command=sort_name, width=16).pack(fill="x", pady=2)
 
     f_opt = ttk.LabelFrame(tab_run, text=" 2. บันทึกผลเป็นไฟล์ (ไม่ติ๊กเลย = แสดงข้อความอย่างเดียว) ")
     f_opt.pack(fill="x", padx=6, pady=4)
@@ -152,6 +177,22 @@ def main():
     ttk.Checkbutton(row, text="Word (.docx)", variable=v_docx).pack(side="left", padx=(0, 16))
     v_xlsx = tk.BooleanVar(value=True)
     ttk.Checkbutton(row, text="ตาราง → Excel (.xlsx)", variable=v_xlsx).pack(side="left")
+
+    v_combine = tk.BooleanVar(value=False)
+    v_cname = tk.StringVar()
+    rc = ttk.Frame(f_opt)
+    rc.pack(fill="x", padx=8, pady=2)
+    ttk.Checkbutton(rc, text="รวมทุกไฟล์เป็นไฟล์เดียว (เรียงตามลำดับในรายการ)",
+                    variable=v_combine).pack(side="left")
+    ttk.Label(rc, text="  ชื่อไฟล์:").pack(side="left")
+    e_cname = ttk.Entry(rc, textvariable=v_cname, width=28)
+    e_cname.pack(side="left", padx=4)
+    ttk.Label(rc, text="(เว้นว่าง = ตั้งให้อัตโนมัติ)", foreground="#555").pack(side="left")
+
+    def _combine_state(*_):
+        e_cname.configure(state="normal" if v_combine.get() else "disabled")
+    v_combine.trace_add("write", _combine_state)
+    _combine_state()
 
     v_mode = tk.StringVar(value="beside")
     v_outdir = tk.StringVar()
@@ -535,7 +576,8 @@ def main():
         batch = list(files)
         args = dict(files=batch, out_mode=v_mode.get(), out_dir=out_dir, formats=formats,
                     dpi=int(v_dpi.get()), use_text_layer=v_textlayer.get(), workers=workers,
-                    find_tables=v_tables.get())
+                    find_tables=v_tables.get(),
+                    combine=v_combine.get(), combine_name=v_cname.get().strip())
 
         def job():
             outputs = []
