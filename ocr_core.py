@@ -126,6 +126,8 @@ def ocr_page(job: dict) -> dict:
                     existing = page.get_text("text", sort=True).strip()
                     if len(existing.replace(" ", "")) >= 30:
                         res.update(source="text", text=existing)
+                        if job.get("tables"):
+                            _add_tables(res, lambda: _tables().blocks_from_textlayer(page))
                         return res
                 pix = page.get_pixmap(dpi=job["dpi"], alpha=False)
                 img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
@@ -138,9 +140,28 @@ def ocr_page(job: dict) -> dict:
         res["text"] = r.get("text", "")
         res["lines"] = [{"text": ln["text"], "confidence": float(ln.get("confidence", 0)),
                          "box": ln["box"]} for ln in r.get("lines", []) if ln.get("text")]
+        if job.get("tables"):
+            _add_tables(res, lambda: _tables().blocks_from_ocr(img, res["lines"]))
     except Exception as e:  # noqa: BLE001
         res["error"] = f"{type(e).__name__}: {e}"
     return res
+
+
+def _tables():
+    import thai_tables
+    return thai_tables
+
+
+def _add_tables(res: dict, make_blocks):
+    """หาตารางในหน้า ถ้าเจอ: เก็บ blocks และเปลี่ยนข้อความให้ตารางคั่นช่องด้วย Tab"""
+    try:
+        blocks = make_blocks()
+    except Exception as e:  # noqa: BLE001  ไม่ให้การหาตารางทำให้ทั้งหน้าพัง
+        res["table_error"] = f"{type(e).__name__}: {e}"
+        return
+    if any(b["type"] == "table" for b in blocks):
+        res["blocks"] = blocks
+        res["text"] = _tables().blocks_to_text(blocks)
 
 
 # ---------------------------------------------------------------- writers
@@ -270,9 +291,83 @@ def write_docx(title: str, pages: list[dict], out: Path):
         hr = hp.add_run(f"หน้า {pr['index'] + 1}")
         hr.bold = True
         set_font(hr, 16)
-        for line in pr["text"].strip().split("\n"):
-            doc.add_paragraph(line)
+        if pr.get("blocks"):
+            for b in pr["blocks"]:
+                if b["type"] == "text":
+                    doc.add_paragraph(b["text"])
+                    continue
+                rows = b["rows"]
+                ncol = max(len(r) for r in rows)
+                tbl = doc.add_table(rows=len(rows), cols=ncol)
+                tbl.style = "Table Grid"
+                for ri, row in enumerate(rows):
+                    for ci in range(ncol):
+                        cell = tbl.cell(ri, ci)
+                        cell.text = row[ci] if ci < len(row) else ""
+                        for para in cell.paragraphs:
+                            for run in para.runs:
+                                set_font(run, 14)
+                                run.bold = ri == 0
+                doc.add_paragraph("")
+        else:
+            for line in pr["text"].strip().split("\n"):
+                doc.add_paragraph(line)
     doc.save(out)
+
+
+def _to_number(s: str):
+    """แปลงข้อความตัวเลข (เช่น 1,250.50) เป็นตัวเลข แต่ไม่แตะเลขบัตร/รหัสที่ขึ้นต้นด้วย 0"""
+    import re
+    t = s.strip().replace(" ", "")
+    if not re.fullmatch(r"-?(\d{1,3}(,\d{3})+|\d+)(\.\d+)?", t):
+        return s
+    digits = t.replace(",", "").replace("-", "").split(".")[0]
+    if len(digits) >= 10 or (len(digits) > 1 and digits.startswith("0") and "." not in t):
+        return s
+    v = float(t.replace(",", ""))
+    return int(v) if "." not in t else v
+
+
+def write_xlsx(title: str, pages: list[dict], out: Path) -> int:
+    """ตารางทั้งหมดในไฟล์ลง Excel: 1 ตาราง = 1 ชีต คืนจำนวนตาราง"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    wb.remove(wb.active)
+    thin = Side(style="thin", color="999999")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    n = 0
+    for pr in pages:
+        k = 0
+        for b in pr.get("blocks") or []:
+            if b["type"] != "table":
+                continue
+            n += 1
+            k += 1
+            ws = wb.create_sheet(f"หน้า{pr['index'] + 1}-ตาราง{k}"[:31])
+            widths: dict[int, int] = {}
+            for ri, row in enumerate(b["rows"], start=1):
+                for ci, val in enumerate(row, start=1):
+                    v = _to_number(val) if ri > 1 else val
+                    c = ws.cell(row=ri, column=ci, value=v)
+                    c.font = Font(name="TH Sarabun New", size=14, bold=ri == 1)
+                    c.alignment = Alignment(wrap_text=True, vertical="top")
+                    c.border = border
+                    if isinstance(v, float):
+                        c.number_format = "#,##0.00"
+                    elif isinstance(v, int) and abs(v) >= 1000:
+                        c.number_format = "#,##0"
+                    longest = max((len(x) for x in str(val).split("\n")), default=0)
+                    widths[ci] = max(widths.get(ci, 6), min(50, longest + 2))
+            for ci, w in widths.items():
+                ws.column_dimensions[get_column_letter(ci)].width = w
+            ws.freeze_panes = "A2"
+    if n:
+        wb.properties.title = title
+        wb.save(out)
+    return n
 
 
 # ---------------------------------------------------------------- driver
@@ -283,7 +378,7 @@ class Cancelled(Exception):
 def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: set[str],
               dpi: int = 200, use_text_layer: bool = True, workers: int = 2,
               log=print, progress=lambda done, total: None, stop_flag=lambda: False,
-              engine_factory=None, on_result=None):
+              engine_factory=None, on_result=None, find_tables: bool = True):
     """
     on_result(src_path, pages): เรียกทุกครั้งที่อ่านจบ 1 ไฟล์ (ใช้แสดงข้อความในหน้าต่าง)
     formats ว่างได้ = อ่านอย่างเดียว ไม่บันทึกไฟล์
@@ -308,7 +403,8 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
         meta[fid] = {"path": f, "kind": kind, "n": n, "pages": {}}
         for i in range(n):
             jobs.append({"file_id": fid, "path": str(f), "kind": kind, "index": i,
-                         "dpi": dpi, "use_text_layer": use_text_layer})
+                         "dpi": dpi, "use_text_layer": use_text_layer,
+                         "tables": find_tables or "xlsx" in formats})
     total = len(jobs)
     if not total:
         log("ไม่มีหน้าที่ต้องประมวลผล")
@@ -352,8 +448,14 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
                 o = _unique(dest / f"{stem}.docx", used)
                 write_docx(src.name, pages, o)
                 outputs.append(o)
+            n_tab = sum(1 for p in pages for b in p.get("blocks") or [] if b["type"] == "table")
+            if "xlsx" in formats and n_tab:
+                o = _unique(dest / f"{stem}_ตาราง.xlsx", used)
+                write_xlsx(src.name, pages, o)
+                outputs.append(o)
+            tab_note = f", พบตาราง {n_tab} ตาราง" if n_tab else ""
             log(f"✓ {src.name}: {m['n']} หน้า, ความมั่นใจเฉลี่ย {avg}, "
-                f"บรรทัดที่ควรตรวจ (<90%) {low} บรรทัด{note}")
+                f"บรรทัดที่ควรตรวจ (<90%) {low} บรรทัด{note}{tab_note}")
         except PermissionError:
             log(f"✗ {src.name}: เขียนไฟล์ผลลัพธ์ไม่ได้ (ไฟล์อาจเปิดค้างอยู่ใน Word/PDF reader)")
         except Exception as e:  # noqa: BLE001

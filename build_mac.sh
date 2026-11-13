@@ -46,6 +46,7 @@ echo "[4/4] กำลังสร้าง .app..."
   --hidden-import runtime.line_engine \
   --hidden-import runtime.thai_norm \
   --hidden-import onnxruntime \
+  --hidden-import thai_tables --hidden-import pdf_ops --hidden-import pdf_editor \
   --collect-data docx \
   --collect-all tkinterdnd2 \
   --exclude-module openvino --exclude-module torch --exclude-module matplotlib \

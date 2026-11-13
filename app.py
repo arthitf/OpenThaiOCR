@@ -23,7 +23,7 @@ def main():
     import ocr_core
 
     APP = "OpenThai OCR"
-    VERSION = "1.3"
+    VERSION = "1.4"
     AUTHOR = "arthit.f"
     IS_MAC = sys.platform == "darwin"
     MOD = "Command" if IS_MAC else "Control"
@@ -70,17 +70,14 @@ def main():
     nb.add(tab_run, text="  แปลงไฟล์  ")
     nb.add(tab_txt, text="  ข้อความ  ")
     tab_edit = ttk.Frame(nb)
-    tab_tools = ttk.Frame(nb)
-    nb.add(tab_edit, text="  แก้ไข PDF  ")
-    nb.add(tab_tools, text="  เครื่องมือ PDF  ")
+    nb.add(tab_edit, text="  แก้ไข / เครื่องมือ PDF  ")
     import pdf_editor
     _dnd = DND_FILES if HAS_DND else None
     editor = pdf_editor.EditorTab(tab_edit, ocr_core.ocr_image, HAS_DND, _dnd, MOD, MOD_TXT)
-    tools = pdf_editor.ToolsTab(tab_tools, editor, lambda: nb.select(tab_edit), HAS_DND, _dnd)
 
     def active_tab():
         cur = nb.select()
-        return {str(tab_edit): "edit", str(tab_tools): "tools"}.get(cur, "ocr")
+        return {str(tab_edit): "edit"}.get(cur, "ocr")
 
     def open_in_editor(path):
         if path:
@@ -151,7 +148,9 @@ def main():
     row.pack(fill="x", padx=8, pady=(6, 2))
     ttk.Checkbutton(row, text="PDF ค้นหาข้อความได้", variable=v_pdf).pack(side="left", padx=(0, 16))
     ttk.Checkbutton(row, text="ข้อความ (.txt)", variable=v_txt).pack(side="left", padx=(0, 16))
-    ttk.Checkbutton(row, text="Word (.docx)", variable=v_docx).pack(side="left")
+    ttk.Checkbutton(row, text="Word (.docx)", variable=v_docx).pack(side="left", padx=(0, 16))
+    v_xlsx = tk.BooleanVar(value=True)
+    ttk.Checkbutton(row, text="ตาราง → Excel (.xlsx)", variable=v_xlsx).pack(side="left")
 
     v_mode = tk.StringVar(value="beside")
     v_outdir = tk.StringVar()
@@ -186,6 +185,10 @@ def main():
     v_workers = tk.IntVar(value=max(1, min(4, ncpu // 2)))
     ttk.Spinbox(ra, from_=1, to=max(1, ncpu), textvariable=v_workers, width=4).pack(side="left", padx=4)
     ttk.Label(ra, text="core", foreground="#555").pack(side="left")
+    v_tables = tk.BooleanVar(value=True)
+    ttk.Checkbutton(f_adv, variable=v_tables,
+                    text="หาตาราง: ทำเป็นตารางใน Word/Excel และคัดลอกไปวางใน Excel แล้วแยกช่องได้"
+                    ).pack(anchor="w", padx=8, pady=(0, 2))
     v_textlayer = tk.BooleanVar(value=True)
     ttk.Checkbutton(f_adv, variable=v_textlayer,
                     text="ถ้าหน้าใน PDF มีข้อความอยู่แล้ว (ไม่ใช่ภาพสแกน) ใช้ข้อความเดิม ไม่ต้อง OCR"
@@ -399,6 +402,9 @@ def main():
     root.bind_all(f"<{MOD}-z>", lambda e: editor_key(e, "undo"))
     root.bind_all(f"<{MOD}-Z>", lambda e: editor_key(e, "undo"))
     root.bind_all("<Delete>", lambda e: editor_key(e, "delete"))
+    for _k in ("Left", "Right", "Up", "Down"):
+        root.bind_all(f"<{_k}>", lambda e, k=_k.lower(): editor_key(e, k))
+        root.bind_all(f"<Shift-{_k}>", lambda e, k=_k.lower(): editor_key(e, k + "10"))
     root.bind_all("<BackSpace>", lambda e: editor_key(e, "delete") if IS_MAC else None)
 
     # ---------------- ลากไฟล์มาวาง
@@ -407,9 +413,6 @@ def main():
             paths = root.tk.splitlist(event.data)
             if active_tab() == "edit":
                 editor.open_path(paths[0])
-                return
-            if active_tab() == "tools":
-                tools.add(paths)
                 return
             n = add_paths(paths)
             nb.select(tab_run)
@@ -504,7 +507,7 @@ def main():
         if state["clip_busy"]:
             messagebox.showinfo(APP, "กำลังอ่านภาพจากคลิปบอร์ดอยู่ รอสักครู่")
             return
-        formats = {k for k, v in (("pdf", v_pdf), ("txt", v_txt), ("docx", v_docx)) if v.get()}
+        formats = {k for k, v in (("pdf", v_pdf), ("txt", v_txt), ("docx", v_docx), ("xlsx", v_xlsx)) if v.get()}
         out_dir = None
         if formats and v_mode.get() == "folder":
             if not v_outdir.get().strip():
@@ -528,7 +531,8 @@ def main():
             log("ไม่ได้เลือกรูปแบบไฟล์ — อ่านอย่างเดียว ดูผลได้ที่แท็บ \"ข้อความ\"")
         batch = list(files)
         args = dict(files=batch, out_mode=v_mode.get(), out_dir=out_dir, formats=formats,
-                    dpi=int(v_dpi.get()), use_text_layer=v_textlayer.get(), workers=workers)
+                    dpi=int(v_dpi.get()), use_text_layer=v_textlayer.get(), workers=workers,
+                    find_tables=v_tables.get())
 
         def job():
             outputs = []

@@ -162,10 +162,9 @@ def _css_font(font_path: str | None, size: float, color=(0, 0, 0), extra: str = 
     return css, archive
 
 
-def add_watermark(src, out_path, text: str, font_path: str | None, scale: float = 0.8,
-                  opacity: float = 0.15, angle: int = 45, color=(0.5, 0.5, 0.5)) -> int:
-    """ลายน้ำข้อความเอียงกลางหน้าทุกหน้า"""
-    doc = open_as_pdf(src)
+def watermark_doc(doc, text: str, font_path: str | None, scale: float = 0.8,
+                  opacity: float = 0.15, angle: int = 45, color=(0.5, 0.5, 0.5)) -> None:
+    """ใส่ลายน้ำข้อความกลางทุกหน้า (แก้เอกสารที่เปิดอยู่)"""
     size = 100
     try:
         tl = pymupdf.Font(fontfile=font_path).text_length(text, fontsize=size) if font_path else len(text) * size * 0.6
@@ -183,28 +182,36 @@ def add_watermark(src, out_path, text: str, font_path: str | None, scale: float 
         box = pymupdf.Rect(r.x0 + (r.width - w) / 2, r.y0 + (r.height - h) / 2,
                            r.x0 + (r.width + w) / 2, r.y0 + (r.height + h) / 2)
         page.show_pdf_page(box, tmp, 0, rotate=angle, overlay=True, keep_proportion=True)
-    n = doc.page_count
+
+
+def _save_doc(doc, out_path):
     try:
         doc.subset_fonts()
     except Exception:  # noqa: BLE001
         pass
     doc.save(str(out_path), garbage=3, deflate=True)
+
+
+def add_watermark(src, out_path, text: str, font_path: str | None, scale: float = 0.8,
+                  opacity: float = 0.15, angle: int = 45, color=(0.5, 0.5, 0.5)) -> int:
+    doc = open_as_pdf(src)
+    watermark_doc(doc, text, font_path, scale, opacity, angle, color)
+    n = doc.page_count
+    _save_doc(doc, out_path)
     doc.close()
     return n
 
 
-def add_page_numbers(src, out_path, template: str = "หน้า {n} / {total}", position: str = "bottom-center",
+def page_numbers_doc(doc, template: str = "หน้า {n} / {total}", position: str = "bottom-center",
                      font_path: str | None = None, size: float = 12, start: int = 1,
-                     thai_digits: bool = False, skip_first: bool = False, color=(0, 0, 0)) -> int:
+                     thai_digits: bool = False, skip_first: bool = False, color=(0, 0, 0)) -> None:
     """
     ใส่ข้อความหัว/ท้ายกระดาษทุกหน้า ใช้ {n} = เลขหน้า, {total} = จำนวนหน้า
     position: top-left|top-center|top-right|bottom-left|bottom-center|bottom-right
     """
-    doc = open_as_pdf(src)
     total = doc.page_count
     vpos, hpos = position.split("-")
-    align = {"left": "left", "center": "center", "right": "right"}[hpos]
-    css, arch = _css_font(font_path, size, color, f"text-align:{align};")
+    css, arch = _css_font(font_path, size, color, f"text-align:{hpos};")
     margin = 28
     band = size * 2.2
     for i, page in enumerate(doc):
@@ -217,15 +224,31 @@ def add_page_numbers(src, out_path, template: str = "หน้า {n} / {total}"
             txt = to_thai_digits(txt)
         r = page.rect
         y0 = r.y0 + margin * 0.6 if vpos == "top" else r.y1 - margin * 0.6 - band
-        box = pymupdf.Rect(r.x0 + margin, y0, r.x1 - margin, y0 + band)
-        page.insert_htmlbox(box, _html_escape(txt), css=css, archive=arch)
-    try:
-        doc.subset_fonts()
-    except Exception:  # noqa: BLE001
-        pass
-    doc.save(str(out_path), garbage=3, deflate=True)
+        page.insert_htmlbox(pymupdf.Rect(r.x0 + margin, y0, r.x1 - margin, y0 + band),
+                            _html_escape(txt), css=css, archive=arch)
+
+
+def add_page_numbers(src, out_path, template: str = "หน้า {n} / {total}", position: str = "bottom-center",
+                     font_path: str | None = None, size: float = 12, start: int = 1,
+                     thai_digits: bool = False, skip_first: bool = False, color=(0, 0, 0)) -> int:
+    doc = open_as_pdf(src)
+    page_numbers_doc(doc, template, position, font_path, size, start, thai_digits, skip_first, color)
+    total = doc.page_count
+    _save_doc(doc, out_path)
     doc.close()
     return total
+
+
+def compress_doc(doc, dpi: int = 150, quality: int = 70) -> None:
+    try:
+        doc.rewrite_images(dpi_threshold=dpi + 10, dpi_target=dpi, quality=quality,
+                           lossy=True, lossless=True, bitonal=False, color=True, gray=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def doc_size(doc) -> int:
+    return len(doc.tobytes(garbage=3, deflate=True))
 
 
 # ---------------------------------------------------------------- เปิดไฟล์
@@ -268,14 +291,14 @@ def apply_items(doc: pymupdf.Document, items: list[dict]) -> None:
         if page.rotation:
             page.remove_rotation()  # ให้พิกัดหน้าตรงกับที่มองเห็น
         # 1) คาดดำ: ลบข้อความ/ภาพใต้กล่องจริง ๆ ไม่ใช่แค่ทับ
-        blacks = [it for it in its if it["type"] == "black"]
-        for it in blacks:
-            page.add_redact_annot(pymupdf.Rect(it["rect"]), fill=(0, 0, 0))
+        blacks = [it for it in its if it["type"] in ("black", "erase")]
+        for it in blacks:  # erase = ลบข้อความเดิมแล้วเติมขาว (ใช้กับ "แก้ข้อความเดิม")
+            page.add_redact_annot(pymupdf.Rect(it["rect"]), fill=(0, 0, 0) if it["type"] == "black" else (1, 1, 1))
         if blacks:
             page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_PIXELS)
         # 2) กล่องขาวและไฮไลต์ก่อน แล้วค่อยข้อความ (ข้อความจะไม่ถูกสีทับ)
         order = {"white": 0, "highlight": 1, "text": 2}
-        for it in sorted((i for i in its if i["type"] != "black"), key=lambda i: order[i["type"]]):
+        for it in sorted((i for i in its if i["type"] not in ("black", "erase")), key=lambda i: order[i["type"]]):
             r = pymupdf.Rect(it["rect"])
             if it["type"] == "white":
                 page.draw_rect(r, color=None, fill=(1, 1, 1), overlay=True)
