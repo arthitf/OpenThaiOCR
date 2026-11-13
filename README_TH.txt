@@ -3,7 +3,7 @@ OpenThai OCR — โปรแกรมแปลงเอกสารสแกน
 
 ใช้โมเดล iapp/OpenThai2.0-OCR-Text (Apache-2.0) ของ iApp Technology
 รันบน CPU ไม่ต้องมีการ์ดจอ ไม่ต้องต่ออินเทอร์เน็ตตอนใช้งาน เอกสารไม่ออกนอกเครื่อง
-รองรับ Windows และ Mac ชิป M (M1/M2/M3/M4)
+รองรับ Windows, Mac ชิป M (M1/M2/M3/M4) และ Linux (x86_64)
 พัฒนาโดย arthit.f
 
 
@@ -37,11 +37,24 @@ build.bat จะสร้าง dist\OpenThaiOCR_Setup_v1.2.exe ให้ด้�
   ถ้ายังไม่ได้ ไปที่ System Settings > Privacy & Security > กด Open Anyway
 
 
+Linux (Ubuntu 22.04+ / Debian 12+ / Fedora 36+ / Mint 21+)
+---------------------------------------------------------------------
+ติดตั้งจากไฟล์ที่ build แล้ว:
+1. แตกไฟล์      tar -xzf OpenThaiOCR_linux_x64.tar.gz
+2. ติดตั้ง        bash OpenThaiOCR/install.sh
+   (ไม่ต้อง sudo — จะมี "OpenThai OCR" ในเมนูโปรแกรม และคำสั่ง openthaiocr)
+3. ถอนการติดตั้ง  bash ~/.local/share/OpenThaiOCR/uninstall.sh
+แนะนำติดตั้งเพิ่ม:  sudo apt install fonts-thai-tlwg xclip
+   - fonts-thai-tlwg = ฟอนต์ไทย (ถ้ามี TH Sarabun New ให้วางไว้ที่ ~/.local/share/fonts)
+   - xclip = ใช้ปุ่ม "วางภาพหน้าจอ" (ถ้าใช้ Wayland ติดตั้ง wl-clipboard แทน)
+สร้างเอง: sudo apt install python3-venv python3-tk  แล้ว  bash build_linux.sh
+
+
 สร้างบนคลาวด์ GitHub (ไม่ต้องมีเครื่อง Mac)
 ---------------------------------------------------------------------
 อัปโหลดโฟลเดอร์นี้ขึ้น GitHub (รวมโฟลเดอร์ .github) แล้วไปที่แท็บ Actions
 > Build OpenThai OCR > Run workflow  รอประมาณ 10 นาที
-จะได้ทั้ง OpenThaiOCR_win และ OpenThaiOCR_mac ให้ดาวน์โหลดในหัวข้อ Artifacts
+จะได้ทั้ง OpenThaiOCR_win, OpenThaiOCR_mac และ OpenThaiOCR_linux_x64 ให้ดาวน์โหลดในหัวข้อ Artifacts
 
 
 วิธีใช้
@@ -92,7 +105,7 @@ build.bat จะสร้าง dist\OpenThaiOCR_Setup_v1.2.exe ให้ด้�
 
 อ่านจากภาพหน้าจอ (เร็วที่สุด)
 ---------------------------------------------------------------------
-1. แคปหน้าจอส่วนที่ต้องการ   Windows: Win+Shift+S   Mac: Cmd+Ctrl+Shift+4
+1. แคปหน้าจอส่วนที่ต้องการ   Windows: Win+Shift+S   Mac: Cmd+Ctrl+Shift+4   Linux: Shift+PrtSc แล้วเลือกคัดลอก
 2. กลับมาที่โปรแกรม กด Ctrl+V (Mac: Cmd+V)
 3. ข้อความจะแสดงในแท็บ "ข้อความ" และถูกคัดลอกให้อัตโนมัติ นำไปวางที่อื่นได้ทันที
 ใช้กับหน้าจอระบบต่าง ๆ, PDF ที่ห้ามคัดลอก, รูปในไลน์ ฯลฯ

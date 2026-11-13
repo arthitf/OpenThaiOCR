@@ -23,9 +23,10 @@ def main():
     import ocr_core
 
     APP = "OpenThai OCR"
-    VERSION = "1.4"
+    VERSION = "1.4.1"
     AUTHOR = "arthit.f"
     IS_MAC = sys.platform == "darwin"
+    IS_LINUX = sys.platform.startswith("linux")
     MOD = "Command" if IS_MAC else "Control"
     MOD_TXT = "Cmd" if IS_MAC else "Ctrl"
     UI_FONT = ("Tahoma", 10)
@@ -340,7 +341,8 @@ def main():
             from PIL import ImageGrab
             data = ImageGrab.grabclipboard()
         except Exception as e:  # noqa: BLE001
-            lbl_txt_status.config(text=f"อ่านคลิปบอร์ดไม่ได้: {e}")
+            hint = " (Linux: ติดตั้ง xclip หรือ wl-clipboard ก่อน)" if IS_LINUX else ""
+            lbl_txt_status.config(text=f"อ่านคลิปบอร์ดไม่ได้: {e}{hint}")
             return "break"
         if isinstance(data, list):  # คัดลอกไฟล์มาจาก Explorer/Finder
             n = add_paths(data)
@@ -351,7 +353,7 @@ def main():
             if event is None or event.widget is not txt:
                 nb.select(tab_txt)
                 lbl_txt_status.config(text=f"ในคลิปบอร์ดไม่มีรูปภาพ — แคปหน้าจอก่อน "
-                                           f"({'Cmd+Ctrl+Shift+4' if IS_MAC else 'Win+Shift+S'}) แล้วกด {MOD_TXT}+V")
+                                           f"({'Cmd+Ctrl+Shift+4' if IS_MAC else ('Shift+PrtSc → คัดลอก' if IS_LINUX else 'Win+Shift+S')}) แล้วกด {MOD_TXT}+V")
                 return "break"
             return None  # วางข้อความในช่องข้อความตามปกติ
         if state["running"] or state["clip_busy"]:
@@ -379,17 +381,18 @@ def main():
     btn_paste.configure(command=paste_clipboard)
     root.bind_all(f"<{MOD}-v>", paste_clipboard)
     root.bind_all(f"<{MOD}-V>", paste_clipboard)
-    if sys.platform == "win32":
+    if sys.platform == "win32" or IS_LINUX:
+        KC_V, KC_Z = (86, 90) if sys.platform == "win32" else (55, 52)  # รหัสปุ่ม V/Z (Windows / Linux X11)
         # ตอนแป้นพิมพ์เป็นภาษาไทย Ctrl+V จะไม่ตรงกับ <Control-v> จึงดักด้วยรหัสปุ่ม V แทน
         def ctrl_key(event):
-            if event.keycode == 86 and event.keysym.lower() != "v":
+            if event.keycode == KC_V and event.keysym.lower() != "v":
                 if isinstance(event.widget, (tk.Text, tk.Entry, ttk.Entry)):
                     try:
                         event.widget.event_generate("<<Paste>>")
                     except tk.TclError:
                         pass
                 return paste_clipboard(event)
-            if event.keycode == 90 and event.keysym.lower() != "z":  # Ctrl+Z ตอนแป้นภาษาไทย
+            if event.keycode == KC_Z and event.keysym.lower() != "z":  # Ctrl+Z ตอนแป้นภาษาไทย
                 return editor_key(event, "undo")
             return None
         root.bind_all("<Control-KeyPress>", ctrl_key, add="+")

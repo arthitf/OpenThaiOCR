@@ -28,6 +28,9 @@ FONT_CHOICES = [
         rf"{_LOCAL}\Microsoft\Windows\Fonts\THSarabunNew.ttf",
         "/Library/Fonts/THSarabunNew.ttf",
         os.path.expanduser("~/Library/Fonts/THSarabunNew.ttf"),
+        "/usr/share/fonts/truetype/THSarabunNew.ttf",
+        os.path.expanduser("~/.local/share/fonts/THSarabunNew.ttf"),
+        os.path.expanduser("~/.fonts/THSarabunNew.ttf"),
     ]),
     ("Tahoma", "Tahoma", [
         rf"{_WIN}\Fonts\tahoma.ttf",
@@ -35,7 +38,17 @@ FONT_CHOICES = [
         "/Library/Fonts/Tahoma.ttf",
     ]),
     ("Leelawadee UI", "Leelawadee UI", [rf"{_WIN}\Fonts\LeelawUI.ttf"]),
-    ("Loma", "Loma", ["/usr/share/fonts/opentype/tlwg/Loma.otf"]),  # Linux (ใช้ทดสอบ)
+    # Linux
+    ("Noto Sans Thai", "Noto Sans Thai", [
+        "/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",
+        "/usr/share/fonts/google-noto/NotoSansThai-Regular.ttf",
+    ]),
+    ("Laksaman (คล้าย Sarabun)", "Laksaman", [
+        "/usr/share/fonts/opentype/tlwg/Laksaman.otf",
+        "/usr/share/fonts/truetype/tlwg/Laksaman.ttf",
+    ]),
+    ("Garuda", "Garuda", ["/usr/share/fonts/opentype/tlwg/Garuda.otf", "/usr/share/fonts/truetype/tlwg/Garuda.ttf"]),
+    ("Loma", "Loma", ["/usr/share/fonts/opentype/tlwg/Loma.otf", "/usr/share/fonts/truetype/tlwg/Loma.ttf"]),
 ]
 
 

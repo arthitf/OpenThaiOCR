@@ -31,9 +31,15 @@ FONT_CANDIDATES = [
     "/System/Library/Fonts/Supplemental/Tahoma.ttf",      # macOS
     "/System/Library/Fonts/Supplemental/Ayuthaya.ttf",    # macOS
     "/System/Library/Fonts/Supplemental/Silom.ttf",       # macOS
+    "/Library/Fonts/Tahoma.ttf",
+    # Linux (Ubuntu/Debian: fonts-thai-tlwg, fonts-noto-core / Fedora: google-noto-sans-thai-fonts)
+    "/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",
+    "/usr/share/fonts/google-noto/NotoSansThai-Regular.ttf",
+    "/usr/share/fonts/google-noto-vf/NotoSansThai[wght].ttf",
     "/usr/share/fonts/opentype/tlwg/Loma.otf",
     "/usr/share/fonts/truetype/tlwg/Loma.ttf",
-    "/Library/Fonts/Tahoma.ttf",
+    "/usr/share/fonts/opentype/tlwg/Garuda.otf",
+    "/usr/share/fonts/truetype/tlwg/Garuda.ttf",
 ]
 
 
@@ -55,6 +61,13 @@ def find_font() -> str | None:
     for p in [*map(str, cands), *FONT_CANDIDATES]:
         if os.path.exists(p):
             return p
+    if sys.platform.startswith("linux"):  # Linux: หาฟอนต์ไทยตัวไหนก็ได้ในเครื่อง
+        for d in ("/usr/share/fonts", "/usr/local/share/fonts", os.path.expanduser("~/.local/share/fonts")):
+            if os.path.isdir(d):
+                for pat in ("**/*Thai*.ttf", "**/*Sarabun*.ttf", "**/tlwg/*.ttf", "**/tlwg/*.otf"):
+                    hit = sorted(Path(d).glob(pat))
+                    if hit:
+                        return str(hit[0])
     return None
 
 
