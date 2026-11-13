@@ -15,7 +15,12 @@ OpenThai OCR — โปรแกรมแปลงเอกสารสแกน
 3. ดับเบิลคลิก build.bat แล้วรอ (ครั้งแรกประมาณ 5–10 นาที)
 4. ได้โปรแกรมที่  dist\OpenThaiOCR\OpenThaiOCR.exe
 
-แจกให้คนอื่นใช้: zip ทั้งโฟลเดอร์ dist\OpenThaiOCR ส่งไป
+ตัวติดตั้ง (Setup.exe): ถ้าเครื่องมี Inno Setup 6 (https://jrsoftware.org/isdl.php)
+build.bat จะสร้าง dist\OpenThaiOCR_Setup_v1.2.exe ให้ด้วย
+  - ดับเบิลคลิกติดตั้งได้เลย ไม่ต้องเป็น admin
+  - มีไอคอนใน Start menu / Desktop, เมนูคลิกขวา "อ่านด้วย OpenThai OCR" และถอนการติดตั้งได้จาก Settings > Apps
+
+แจกให้คนอื่นใช้: ส่งไฟล์ Setup.exe หรือ zip ทั้งโฟลเดอร์ dist\OpenThaiOCR ส่งไป
 เครื่องปลายทางแตก zip แล้วดับเบิลคลิก OpenThaiOCR.exe ได้เลย ไม่ต้องติดตั้ง Python
 (ต้องส่งทั้งโฟลเดอร์ ส่งแค่ไฟล์ .exe ไฟล์เดียวจะเปิดไม่ได้)
 
@@ -24,7 +29,8 @@ OpenThai OCR — โปรแกรมแปลงเอกสารสแกน
 ---------------------------------------------------------------------
 1. ติดตั้ง Python 3.12 จาก https://www.python.org/downloads/macos/
 2. เปิด Terminal ในโฟลเดอร์นี้ แล้วพิมพ์   bash build_mac.sh
-3. ได้โปรแกรมที่  dist/OpenThaiOCR.app  และไฟล์แจก  dist/OpenThaiOCR_mac.zip
+3. ได้โปรแกรมที่  dist/OpenThaiOCR.app  และตัวติดตั้ง  dist/OpenThaiOCR_mac.dmg
+   (เปิด .dmg แล้วลาก OpenThai OCR ไปใส่โฟลเดอร์ Applications)
 
 เปิดครั้งแรกบน Mac: macOS จะบล็อกเพราะโปรแกรมไม่ได้ลงทะเบียนกับ Apple
   ให้คลิกขวาที่ OpenThaiOCR.app > Open > Open

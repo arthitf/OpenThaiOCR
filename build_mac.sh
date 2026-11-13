@@ -64,10 +64,18 @@ rm -f dist/OpenThaiOCR_mac.zip
 ditto -c -k --keepParent dist/OpenThaiOCR.app dist/OpenThaiOCR_mac.zip
 cp README_TH.txt dist/ 2>/dev/null || true
 
+# ตัวติดตั้งแบบ .dmg (เปิดแล้วลาก OpenThai OCR ไปใส่ Applications)
+rm -rf dist/dmg dist/OpenThaiOCR_mac.dmg
+mkdir -p dist/dmg
+ditto dist/OpenThaiOCR.app "dist/dmg/OpenThai OCR.app"
+ln -s /Applications dist/dmg/Applications
+hdiutil create -volname "OpenThai OCR" -srcfolder dist/dmg -ov -format UDZO dist/OpenThaiOCR_mac.dmg >/dev/null
+rm -rf dist/dmg
+
 echo
-echo "ขนาด .app: $(du -sh dist/OpenThaiOCR.app | cut -f1)   ขนาด zip: $(du -sh dist/OpenThaiOCR_mac.zip | cut -f1)"
+echo "ขนาด .app: $(du -sh dist/OpenThaiOCR.app | cut -f1)   zip: $(du -sh dist/OpenThaiOCR_mac.zip | cut -f1)   dmg: $(du -sh dist/OpenThaiOCR_mac.dmg | cut -f1)"
 echo "=========================================================="
 echo "  เสร็จแล้ว!  โปรแกรม: dist/OpenThaiOCR.app"
-echo "  ไฟล์สำหรับแจก:   dist/OpenThaiOCR_mac.zip"
+echo "  ตัวติดตั้งสำหรับแจก: dist/OpenThaiOCR_mac.dmg"
 echo "=========================================================="
 [ -n "${CI:-}" ] || open dist

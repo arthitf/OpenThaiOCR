@@ -91,9 +91,25 @@ echo ---- สร้างไฟล์ zip สำหรับแจก ----
 powershell -NoProfile -Command "Compress-Archive -Path 'dist\OpenThaiOCR' -DestinationPath 'dist\OpenThaiOCR_win.zip' -Force; 'Zip size: {0:N0} MB' -f ((Get-Item 'dist\OpenThaiOCR_win.zip').Length/1MB)"
 
 echo.
+echo ---- สร้างตัวติดตั้ง (Setup.exe) ----
+set "ISCC="
+if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+if not defined ISCC (
+  echo   ไม่พบ Inno Setup ในเครื่อง  ข้ามขั้นตอนนี้
+  echo   ถ้าต้องการไฟล์ติดตั้ง: ติดตั้ง Inno Setup 6 จาก https://jrsoftware.org/isdl.php แล้วรัน build.bat ใหม่
+  goto :done
+)
+"%ISCC%" /Q setup.iss || goto :fail
+echo   ได้ตัวติดตั้งแล้ว: dist\OpenThaiOCR_Setup_v*.exe
+
+:done
+echo.
 echo ==========================================================
 echo   เสร็จแล้ว!  โปรแกรมอยู่ที่  dist\OpenThaiOCR\OpenThaiOCR.exe
-echo   ไฟล์สำหรับแจก:            dist\OpenThaiOCR_win.zip
+echo   ไฟล์ zip สำหรับแจก:        dist\OpenThaiOCR_win.zip
+if defined ISCC echo   ตัวติดตั้งสำหรับแจก:       dist\OpenThaiOCR_Setup_v*.exe
 echo ==========================================================
 if defined CI exit /b 0
 explorer "dist"
