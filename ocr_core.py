@@ -212,6 +212,10 @@ def _load_image_frame(path: str, index: int) -> tuple[Image.Image, float]:
         dpi = 0.0
     if dpi < 50 or dpi > 1200:
         dpi = 200.0
+    # รูปถ่ายมือถือ/ภาพหน้าจอมักติดค่า 72 หรือ 96 dpi ซึ่งไม่ใช่ขนาดกระดาษจริง
+    # ถ้าใช้ตรงๆ หน้า PDF จะใหญ่เกิน (เช่น 39x52 ซม.) จึงปรับให้ด้านยาวพอดีกระดาษ A4
+    if dpi <= 96:
+        dpi = max(dpi, max(frame.size) / 11.69)
     return frame, dpi
 
 

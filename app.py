@@ -23,7 +23,7 @@ def main():
     import ocr_core
 
     APP = "OpenThai OCR"
-    VERSION = "1.5.0"
+    VERSION = "1.5.1"
     AUTHOR = "arthit.f"
     IS_MAC = sys.platform == "darwin"
     IS_LINUX = sys.platform.startswith("linux")
@@ -705,6 +705,29 @@ def selftest(out_path: str) -> int:
     except Exception as e:  # noqa: BLE001
         ok = False
         report.append(f"ERROR th {type(e).__name__}: {e}\n{traceback.format_exc()}")
+    # เขียนไฟล์ผลลัพธ์ทุกรูปแบบด้วยโปรแกรมที่แพ็กแล้ว (Word / Excel / txt / PDF)
+    try:
+        import tempfile
+        tmp = Path(tempfile.mkdtemp())
+        pages = [{"index": 0, "dpi": 200, "source": "ocr", "error": None, "lines": [],
+                  "text": "Größe 175 cm\nทดสอบภาษาไทย", "label": "a.jpg", "gpage": 1,
+                  "blocks": [{"type": "text", "text": "Größe ทดสอบ"},
+                             {"type": "table", "rows": [["A", "B"], ["1,250.50", "0123"]]}]}]
+        for name, fn in (("docx", lambda o: ocr_core.write_docx("selftest", pages, o)),
+                         ("xlsx", lambda o: ocr_core.write_xlsx("selftest", pages, o)),
+                         ("txt", lambda o: ocr_core.write_txt(pages, o))):
+            o = tmp / f"selftest.{name}"
+            try:
+                fn(o)
+                hit = o.exists() and o.stat().st_size > 0
+                ok &= hit
+                report.append(f"{'OK ' if hit else 'MISS'} write {name} ({o.stat().st_size if o.exists() else 0} bytes)")
+            except Exception as e:  # noqa: BLE001
+                ok = False
+                report.append(f"ERROR write {name} {type(e).__name__}: {e}\n{traceback.format_exc()}")
+    except Exception as e:  # noqa: BLE001
+        ok = False
+        report.append(f"ERROR writers {type(e).__name__}: {e}")
     report.append("PASS" if ok else "FAIL")
     Path(out_path).write_text("\n".join(report) + "\n", encoding="utf-8")
     return 0 if ok else 1
