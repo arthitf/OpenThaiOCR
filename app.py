@@ -23,7 +23,7 @@ def main():
     import ocr_core
 
     APP = "OpenThai OCR"
-    VERSION = "1.2"
+    VERSION = "1.3"
     AUTHOR = "arthit.f"
     IS_MAC = sys.platform == "darwin"
     MOD = "Command" if IS_MAC else "Control"
@@ -42,8 +42,8 @@ def main():
         HAS_DND = False
 
     root.title(f"{APP} — แปลงเอกสารสแกนเป็นข้อความ (ออฟไลน์)")
-    root.geometry("820x700")
-    root.minsize(680, 600)
+    root.geometry("1000x780")
+    root.minsize(780, 620)
     root.option_add("*Font", UI_FONT)
     style = ttk.Style()
     for w in ("TLabel", "TButton", "TCheckbutton", "TRadiobutton", "TLabelframe.Label",
@@ -69,6 +69,23 @@ def main():
     tab_txt = ttk.Frame(nb)
     nb.add(tab_run, text="  แปลงไฟล์  ")
     nb.add(tab_txt, text="  ข้อความ  ")
+    tab_edit = ttk.Frame(nb)
+    tab_tools = ttk.Frame(nb)
+    nb.add(tab_edit, text="  แก้ไข PDF  ")
+    nb.add(tab_tools, text="  เครื่องมือ PDF  ")
+    import pdf_editor
+    _dnd = DND_FILES if HAS_DND else None
+    editor = pdf_editor.EditorTab(tab_edit, ocr_core.ocr_image, HAS_DND, _dnd, MOD, MOD_TXT)
+    tools = pdf_editor.ToolsTab(tab_tools, editor, lambda: nb.select(tab_edit), HAS_DND, _dnd)
+
+    def active_tab():
+        cur = nb.select()
+        return {str(tab_edit): "edit", str(tab_tools): "tools"}.get(cur, "ocr")
+
+    def open_in_editor(path):
+        if path:
+            nb.select(tab_edit)
+            editor.open_path(path)
 
     # ================================================================ แท็บ 1: แปลงไฟล์
     hint = "ลากไฟล์มาวางที่นี่ได้" if HAS_DND else "เลือกได้หลายไฟล์พร้อมกัน"
@@ -83,7 +100,8 @@ def main():
     btns.grid(row=0, column=2, sticky="n", padx=8, pady=8)
     f_in.columnconfigure(0, weight=1)
     f_in.rowconfigure(0, weight=1)
-    lbl_count = ttk.Label(f_in, text="ยังไม่ได้เลือกไฟล์", foreground="#555")
+    lst.bind("<Double-Button-1>", lambda e: lst.curselection() and open_in_editor(files[lst.curselection()[0]]))
+    lbl_count = ttk.Label(f_in, text="ยังไม่ได้เลือกไฟล์ (ดับเบิลคลิกชื่อไฟล์เพื่อแก้ไข)", foreground="#555")
     lbl_count.grid(row=1, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 6))
 
     def refresh_list():
@@ -197,6 +215,8 @@ def main():
     btn_paste.pack(side="left", padx=6)
     btn_save = ttk.Button(bar, text="บันทึกเป็น...")
     btn_save.pack(side="left")
+    btn_edit_res = ttk.Button(bar, text="แก้ไขไฟล์นี้")
+    btn_edit_res.pack(side="left", padx=6)
     btn_clear_res = ttk.Button(bar, text="ล้างรายการ")
     btn_clear_res.pack(side="right")
     lbl_txt_status = ttk.Label(tab_txt, foreground="#555",
@@ -298,8 +318,18 @@ def main():
     btn_save.configure(command=save_as)
     btn_clear_res.configure(command=clear_results)
 
+    def edit_result():
+        sel = res_list.curselection()
+        if sel and results[sel[0]]["path"]:
+            open_in_editor(results[sel[0]]["path"])
+        else:
+            lbl_txt_status.config(text="เลือกไฟล์ในรายการด้านซ้ายก่อน (ภาพหน้าจอแก้ไขไม่ได้)")
+    btn_edit_res.configure(command=edit_result)
+
     # ---------------- วางจากคลิปบอร์ด
     def paste_clipboard(event=None):
+        if event is not None and active_tab() != "ocr":
+            return None  # อยู่ในแท็บแก้ไข/เครื่องมือ ไม่ต้อง OCR คลิปบอร์ด
         # ถ้าโฟกัสอยู่ในช่องพิมพ์ ให้ทำงานวางข้อความตามปกติ
         if event is not None and isinstance(event.widget, (tk.Entry, ttk.Entry)):
             return None
@@ -356,13 +386,31 @@ def main():
                     except tk.TclError:
                         pass
                 return paste_clipboard(event)
+            if event.keycode == 90 and event.keysym.lower() != "z":  # Ctrl+Z ตอนแป้นภาษาไทย
+                return editor_key(event, "undo")
             return None
         root.bind_all("<Control-KeyPress>", ctrl_key, add="+")
+
+    def editor_key(event, name):
+        if active_tab() != "edit" or isinstance(event.widget, (tk.Text, tk.Entry, ttk.Entry, ttk.Spinbox, ttk.Combobox)):
+            return None
+        editor.key(name)
+        return "break"
+    root.bind_all(f"<{MOD}-z>", lambda e: editor_key(e, "undo"))
+    root.bind_all(f"<{MOD}-Z>", lambda e: editor_key(e, "undo"))
+    root.bind_all("<Delete>", lambda e: editor_key(e, "delete"))
+    root.bind_all("<BackSpace>", lambda e: editor_key(e, "delete") if IS_MAC else None)
 
     # ---------------- ลากไฟล์มาวาง
     if HAS_DND:
         def on_drop(event):
             paths = root.tk.splitlist(event.data)
+            if active_tab() == "edit":
+                editor.open_path(paths[0])
+                return
+            if active_tab() == "tools":
+                tools.add(paths)
+                return
             n = add_paths(paths)
             nb.select(tab_run)
             lbl_status.config(text=f"เพิ่ม {n} ไฟล์" if n else "ไม่มีไฟล์ที่รองรับ (PDF/รูปภาพ)")
@@ -506,6 +554,8 @@ def main():
 
     def on_close():
         if state["running"] and not messagebox.askyesno(APP, "กำลังประมวลผลอยู่ ต้องการปิดโปรแกรมหรือไม่?"):
+            return
+        if editor.dirty and not messagebox.askyesno(APP, "มีการแก้ไข PDF ที่ยังไม่ได้บันทึก ต้องการปิดโปรแกรมหรือไม่?"):
             return
         state["stop"] = True
         root.destroy()

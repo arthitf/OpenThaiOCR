@@ -11,6 +11,7 @@ import io
 import math
 import os
 import sys
+import threading
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -83,6 +84,7 @@ def count_pages(path: Path) -> int:
 
 # ---------------------------------------------------------------- worker
 _OCR = None
+_LOCK = threading.Lock()  # กันหลาย thread เรียกโมเดลพร้อมกัน (เช่น OCR คลิปบอร์ด + หาข้อมูลส่วนบุคคล)
 
 
 def init_worker(mdir: str, threads: int = 1):
@@ -131,7 +133,8 @@ def ocr_page(job: dict) -> dict:
             img, dpi = _load_image_frame(path, idx)
             res["dpi"] = dpi
             res["size"] = img.size
-        r = _OCR.read(img)
+        with _LOCK:
+            r = _OCR.read(img)
         res["text"] = r.get("text", "")
         res["lines"] = [{"text": ln["text"], "confidence": float(ln.get("confidence", 0)),
                          "box": ln["box"]} for ln in r.get("lines", []) if ln.get("text")]
@@ -397,9 +400,10 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
 # ---------------------------------------------------------------- อ่านภาพเดี่ยว (คลิปบอร์ด)
 def ocr_image(img: Image.Image) -> dict:
     """อ่านภาพ PIL 1 ภาพใน process หลัก (ใช้กับภาพหน้าจอที่วางจากคลิปบอร์ด)"""
-    if _OCR is None:
-        init_worker(str(model_dir()), threads=max(1, min(4, os.cpu_count() or 1)))
-    r = _OCR.read(img.convert("RGB"))
+    with _LOCK:
+        if _OCR is None:
+            init_worker(str(model_dir()), threads=max(1, min(4, os.cpu_count() or 1)))
+        r = _OCR.read(img.convert("RGB"))
     return {"index": 0, "source": "ocr", "text": r.get("text", ""), "error": None,
             "lines": [{"text": ln["text"], "confidence": float(ln.get("confidence", 0)),
                        "box": ln["box"]} for ln in r.get("lines", []) if ln.get("text")]}
