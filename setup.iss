@@ -2,7 +2,7 @@
 ; build.bat จะเรียกไฟล์นี้ให้อัตโนมัติถ้าเครื่องมี Inno Setup
 
 #define AppName "OpenThai OCR"
-#define AppVersion "1.5.2"
+#define AppVersion "1.5.3"
 #define AppPublisher "arthit.f"
 #define AppExe "OpenThaiOCR.exe"
 
@@ -26,6 +26,7 @@ OutputBaseFilename=OpenThaiOCR_Setup_v{#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=app_icon.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 CloseApplications=yes

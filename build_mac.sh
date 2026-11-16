@@ -42,6 +42,8 @@ echo "[4/4] กำลังสร้าง .app..."
 "$VPY" -m PyInstaller --noconfirm --clean --onedir --windowed \
   --name OpenThaiOCR \
   --osx-bundle-identifier com.arthitf.openthaiocr \
+  --icon app_icon.icns \
+  --add-data "app_icon.png:assets" \
   --paths model \
   --hidden-import runtime.line_engine \
   --hidden-import runtime.thai_norm \

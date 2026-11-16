@@ -42,6 +42,7 @@ fi
 echo "[4/4] กำลังสร้างโปรแกรม..."
 "$VPY" -m PyInstaller --noconfirm --clean --onedir --windowed \
   --name OpenThaiOCR \
+  --add-data "app_icon.png:assets" \
   --paths model \
   --hidden-import runtime.line_engine \
   --hidden-import runtime.thai_norm \
@@ -84,6 +85,7 @@ Type=Application
 Name=OpenThai OCR
 Comment=อ่านข้อความภาษาไทยจากภาพและ PDF · แก้ไข PDF (by arthit.f)
 Exec="$DEST/OpenThaiOCR" %F
+Icon=$DEST/_internal/assets/app_icon.png
 Terminal=false
 Categories=Office;Graphics;
 MimeType=application/pdf;image/png;image/jpeg;image/tiff;

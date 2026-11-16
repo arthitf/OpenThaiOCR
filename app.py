@@ -23,7 +23,7 @@ def main():
     import ocr_core
 
     APP = "OpenThai OCR"
-    VERSION = "1.5.2"
+    VERSION = "1.5.3"
     AUTHOR = "arthit.f"
     IS_MAC = sys.platform == "darwin"
     IS_LINUX = sys.platform.startswith("linux")
@@ -43,6 +43,16 @@ def main():
         HAS_DND = False
 
     root.title(f"{APP} — แปลงเอกสารสแกนเป็นข้อความ (ออฟไลน์)")
+    try:  # ไอคอนหน้าต่าง/แถบงาน
+        _base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        _ico = _base / "assets" / "app_icon.png"
+        if _ico.exists():
+            root._app_icon = tk.PhotoImage(file=str(_ico))
+            root.iconphoto(True, root._app_icon)
+        if sys.platform == "win32" and (_base / "assets" / "icon.ico").exists():
+            root.iconbitmap(default=str(_base / "assets" / "icon.ico"))
+    except Exception:  # noqa: BLE001
+        pass
     root.geometry("1000x780")
     root.minsize(780, 620)
     root.option_add("*Font", UI_FONT)

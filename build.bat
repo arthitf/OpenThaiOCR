@@ -53,6 +53,8 @@ echo [4/4] กำลังสร้าง exe...
 "%VPY%" -m PyInstaller --noconfirm --clean --onedir --windowed ^
   --name OpenThaiOCR ^
   --version-file version_info.txt ^
+  --icon app_icon.ico ^
+  --add-data "app_icon.png;assets" ^
   --paths model ^
   --hidden-import runtime.line_engine ^
   --hidden-import runtime.thai_norm ^
