@@ -62,6 +62,10 @@ echo [4/4] กำลังสร้าง exe...
   --hidden-import thai_tables ^
   --hidden-import pdf_ops ^
   --hidden-import pdf_editor ^
+  --hidden-import thai_wordseg ^
+  --hidden-import wordseg_latte ^
+  --hidden-import wordseg_tab ^
+  --add-data "wordseg;wordseg" ^
   --collect-data docx ^
   --collect-all tkinterdnd2 ^
   --collect-data rapidocr ^

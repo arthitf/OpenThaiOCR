@@ -130,6 +130,25 @@ def set_language(lang: str):
     _LANG = lang if lang in LANGS else "th"
 
 
+_FIX_SPACES = True  # ลบช่องว่างที่ OCR ใส่ผิดกลางคำ (ใช้ตัวตัดคำ) กับภาพจากคลิปบอร์ด/หน้าแก้ไข
+
+
+def set_fix_spaces(on: bool):
+    global _FIX_SPACES
+    _FIX_SPACES = bool(on)
+
+
+def fix_spaces(res: dict) -> int:
+    """ลบช่องว่างกลางคำในผล OCR ภาษาไทย 1 หน้า คืนจำนวนจุดที่แก้ (ถ้าตัวตัดคำใช้ไม่ได้ คืน 0 และไม่แก้อะไร)"""
+    if res.get("error") or res.get("source") != "ocr":
+        return 0
+    try:
+        import thai_wordseg
+        return thai_wordseg.fix_page(res)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 class LatinOCR:
     """RapidOCR (PP-OCRv6 หลายภาษาที่มากับแพ็กเกจ) แปลงผลให้อยู่ในรูปแบบเดียวกับโมเดลไทย"""
 
@@ -440,6 +459,11 @@ def write_docx(title: str, pages: list[dict], out: Path):
             szcs = rpr.makeelement(qn("w:szCs"), {})
             rpr.append(szcs)
         szcs.set(qn("w:val"), str(int(size * 2)))
+        lang = rpr.find(qn("w:lang"))
+        if lang is None:
+            lang = rpr.makeelement(qn("w:lang"), {})
+            rpr.append(lang)
+        lang.set(qn("w:bidi"), "th-TH")  # ข้อความไทย: Word ตัดบรรทัด/ตรวจคำสะกดตามภาษาไทย
 
     normal = doc.styles["Normal"]
     set_font(normal, 16)
@@ -560,7 +584,8 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
               dpi: int = 200, use_text_layer: bool = True, workers: int = 2,
               log=print, progress=lambda done, total: None, stop_flag=lambda: False,
               engine_factory=None, on_result=None, find_tables: bool = True,
-              combine: bool = False, combine_name: str = "", lang: str = "th"):
+              combine: bool = False, combine_name: str = "", lang: str = "th",
+              fix_spaces_on: bool = True):
     """
     on_result(src_path, pages): เรียกทุกครั้งที่อ่านจบ 1 ไฟล์ (ใช้แสดงข้อความในหน้าต่าง)
     formats ว่างได้ = อ่านอย่างเดียว ไม่บันทึกไฟล์
@@ -618,6 +643,8 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
         low = sum(c < 0.9 for c in confs)
         n_text = sum(p["source"] == "text" for p in pages)
         note = f", ใช้ข้อความเดิมใน PDF {n_text} หน้า" if n_text else ""
+        if m.get("fixed"):
+            note += f", แก้ช่องว่างกลางคำ {m['fixed']} จุด"
         avg = f"{100 * sum(confs) / len(confs):.1f}%" if confs else "-"
         if combine:  # เก็บไว้รวมตอนท้าย
             m["done"] = pages
@@ -636,6 +663,8 @@ def run_batch(files: list[Path], out_mode: str, out_dir: Path | None, formats: s
 
     def collect(res):
         m = meta[res["file_id"]]
+        if fix_spaces_on and lang == "th":
+            m["fixed"] = m.get("fixed", 0) + fix_spaces(res)
         m["pages"][res["index"]] = res
         if len(m["pages"]) == m["n"]:
             finish_file(res["file_id"])
@@ -727,6 +756,9 @@ def ocr_image(img: Image.Image, lang: str | None = None) -> dict:
     """อ่านภาพ PIL 1 ภาพใน process หลัก (ใช้กับภาพหน้าจอที่วางจากคลิปบอร์ด)"""
     with _LOCK:
         r = _engine(lang or _LANG).read(img.convert("RGB"))
-    return {"index": 0, "source": "ocr", "text": r.get("text", ""), "error": None,
-            "lines": [{"text": ln["text"], "confidence": float(ln.get("confidence", 0)),
-                       "box": ln["box"]} for ln in r.get("lines", []) if ln.get("text")]}
+    res = {"index": 0, "source": "ocr", "text": r.get("text", ""), "error": None,
+           "lines": [{"text": ln["text"], "confidence": float(ln.get("confidence", 0)),
+                      "box": ln["box"]} for ln in r.get("lines", []) if ln.get("text")]}
+    if _FIX_SPACES and (lang or _LANG) == "th":
+        res["fixed"] = fix_spaces(res)
+    return res

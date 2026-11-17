@@ -23,7 +23,7 @@ def main():
     import ocr_core
 
     APP = "OpenThai OCR"
-    VERSION = "1.5.3"
+    VERSION = "1.6.0"
     AUTHOR = "arthit.f"
     IS_MAC = sys.platform == "darwin"
     IS_LINUX = sys.platform.startswith("linux")
@@ -71,7 +71,7 @@ def main():
     footer = ttk.Frame(root)
     footer.pack(side="bottom", fill="x", padx=10, pady=(0, 6))
     ttk.Label(footer, text=f"พัฒนาโดย {AUTHOR}", foreground="#777").pack(side="left")
-    ttk.Label(footer, text=f"{APP} v{VERSION}  ·  โมเดล OCR: iApp Technology, PaddleOCR/RapidOCR",
+    ttk.Label(footer, text=f"{APP} v{VERSION}  ·  โมเดล OCR และตัดคำ: iApp Technology, PaddleOCR/RapidOCR",
               foreground="#999").pack(side="right")
 
     nb = ttk.Notebook(root)
@@ -80,6 +80,8 @@ def main():
     tab_txt = ttk.Frame(nb)
     nb.add(tab_run, text="  แปลงไฟล์  ")
     nb.add(tab_txt, text="  ข้อความ  ")
+    tab_ws = ttk.Frame(nb)
+    nb.add(tab_ws, text="  ตัดคำ  ")
     tab_edit = ttk.Frame(nb)
     nb.add(tab_edit, text="  แก้ไข / เครื่องมือ PDF  ")
     import pdf_editor
@@ -88,12 +90,17 @@ def main():
 
     def active_tab():
         cur = nb.select()
-        return {str(tab_edit): "edit"}.get(cur, "ocr")
+        return {str(tab_edit): "edit", str(tab_ws): "ws"}.get(cur, "ocr")
 
     def open_in_editor(path):
         if path:
             nb.select(tab_edit)
             editor.open_path(path)
+
+    # ================================================================ แท็บ ตัดคำ
+    import wordseg_tab
+    wordseg_tab.WordSegTab(tab_ws, APP, TEXT_FONT, get_ocr_text=lambda: txt.get("1.0", "end-1c"),
+                           has_dnd=HAS_DND, dnd_files=_dnd)
 
     # ================================================================ แท็บ 1: แปลงไฟล์
     hint = "ลากไฟล์มาวางที่นี่ได้" if HAS_DND else "เลือกได้หลายไฟล์พร้อมกัน"
@@ -268,6 +275,11 @@ def main():
     ttk.Checkbutton(f_adv, variable=v_tables,
                     text="หาตาราง: ทำเป็นตารางใน Word/Excel และคัดลอกไปวางใน Excel แล้วแยกช่องได้"
                     ).pack(anchor="w", padx=8, pady=(0, 2))
+    v_fixsp = tk.BooleanVar(value=True)
+    ttk.Checkbutton(f_adv, variable=v_fixsp,
+                    text="แก้ช่องว่างที่ OCR ใส่ผิดกลางคำ (ภาษาไทย ใช้ตัวตัดคำ เช่น \"โรงพ ยาบาล\" → \"โรงพยาบาล\")"
+                    ).pack(anchor="w", padx=8, pady=(0, 2))
+    v_fixsp.trace_add("write", lambda *_: ocr_core.set_fix_spaces(v_fixsp.get()))
     v_textlayer = tk.BooleanVar(value=True)
     ttk.Checkbutton(f_adv, variable=v_textlayer,
                     text="ถ้าหน้าใน PDF มีข้อความอยู่แล้ว (ไม่ใช่ภาพสแกน) ใช้ข้อความเดิม ไม่ต้อง OCR"
@@ -615,7 +627,7 @@ def main():
                     dpi=int(v_dpi.get()), use_text_layer=v_textlayer.get(), workers=workers,
                     find_tables=v_tables.get(),
                     combine=v_combine.get(), combine_name=v_cname.get().strip(),
-                    lang=cur_lang())
+                    lang=cur_lang(), fix_spaces_on=v_fixsp.get())
 
         def job():
             outputs = []
@@ -715,6 +727,17 @@ def selftest(out_path: str) -> int:
     except Exception as e:  # noqa: BLE001
         ok = False
         report.append(f"ERROR th {type(e).__name__}: {e}\n{traceback.format_exc()}")
+    # ตัวตัดคำ (OpenThai2.0-LATTE-WordSeg-Lite) ที่ฝังมากับโปรแกรม
+    try:
+        import thai_wordseg
+        toks = thai_wordseg.tokenize("เจ้าหน้าที่การศึกษาเปิดเผยว่า", unit="long")
+        fixed, n = thai_wordseg.fix_ocr_spaces("มารับบริการที่โรงพ ยาบาล สิทธิ บัตรทอง")
+        hit = toks == ["เจ้าหน้าที่", "การศึกษา", "เปิดเผย", "ว่า"] and fixed == "มารับบริการที่โรงพยาบาล สิทธิ บัตรทอง"
+        ok &= hit
+        report.append(f"{'OK ' if hit else 'MISS'} wordseg {toks} / {fixed!r} ({n})")
+    except Exception as e:  # noqa: BLE001
+        ok = False
+        report.append(f"ERROR wordseg {type(e).__name__}: {e}\n{traceback.format_exc()}")
     # เขียนไฟล์ผลลัพธ์ทุกรูปแบบด้วยโปรแกรมที่แพ็กแล้ว (Word / Excel / txt / PDF)
     try:
         import tempfile

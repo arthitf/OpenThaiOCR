@@ -48,6 +48,8 @@ echo "[4/4] กำลังสร้างโปรแกรม..."
   --hidden-import runtime.thai_norm \
   --hidden-import onnxruntime \
   --hidden-import thai_tables --hidden-import pdf_ops --hidden-import pdf_editor \
+  --hidden-import thai_wordseg --hidden-import wordseg_latte --hidden-import wordseg_tab \
+  --add-data "wordseg:wordseg" \
   --hidden-import PIL._tkinter_finder \
   --collect-data docx \
   --collect-all tkinterdnd2 \
