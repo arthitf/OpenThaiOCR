@@ -323,11 +323,17 @@ def main():
             rr[kind] = {c: sc[c].row() for c in CONDITIONS}
             rr[kind]["ALL"] = allsc.row()
             if kind == "lines":
+                rr["confusions"] = confusions(allsc.worst)
                 rr["worst_lines"] = [{"cer": round(w[0], 3), "where": w[1], "ref": w[2], "hyp": w[3]}
                                      for w in sorted(allsc.worst, reverse=True)[:25]]
             print(f"{key} {kind}: {rr[kind]['ALL']}", flush=True)
         res["engines"][key] = {"name": e.name, **rr}
 
+    for key, r in res["engines"].items():  # แสดงบรรทัดที่ผิดมากสุด + ตัวอักษรที่สับสนบ่อย (ข้อความสมมติ)
+        print(f"\n--- worst lines: {key}")
+        for w in r.get("worst_lines", [])[:12]:
+            print(f"  {w['cer']:.3f} {w['where']}\n    REF {w['ref']}\n    HYP {w['hyp']}")
+        print(f"--- confusions: {key}: {r.get('confusions')}")
     (out / "results.json").write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
     md = report(res)
     (out / "RESULTS.md").write_text(md, encoding="utf-8")
@@ -335,6 +341,22 @@ def main():
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
             f.write(md + "\n")
+
+
+def confusions(worst, top=15):
+    from collections import Counter
+    c = Counter()
+    try:
+        from rapidfuzz.distance import Levenshtein
+    except ImportError:
+        return []
+    for _e, _w, ref, hyp in worst:
+        r, h = norm(ref), norm(hyp)
+        for op in Levenshtein.editops(r, h):
+            a = r[op.src_pos] if op.tag != "insert" else ""
+            b = h[op.dest_pos] if op.tag != "delete" else ""
+            c[f"{a!r}->{b!r}"] += 1
+    return c.most_common(top)
 
 
 def report(res):
