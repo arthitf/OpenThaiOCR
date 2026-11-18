@@ -1,0 +1,50 @@
+# ทดสอบเทียบ OCR ภาษาไทย: OpenThai2.0-OCR-Text (ที่ใช้อยู่) กับ AksonOCR-Lite
+# ใช้ภาพที่สร้างจากข้อความสมมติ (bench/corpus_th.txt) ไม่มีข้อมูลจริง
+# วิธีใช้: แท็บ Actions > Benchmark Thai OCR > Run workflow  ผลอยู่ในหน้าสรุปของการรัน
+name: Benchmark Thai OCR
+
+on:
+  workflow_dispatch:
+
+env:
+  AKSON_REF: 8f1f3d87d41e2b585354950767b9a9be678e0352
+
+jobs:
+  bench:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Thai fonts (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q fonts-thai-tlwg
+      - name: Install
+        shell: bash
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip install -q -r requirements.txt rapidfuzz huggingface_hub
+          python -m pip install -q "git+https://github.com/Remtir/AksonOCR-Lite@${AKSON_REF}"
+          python -m pip list 2>/dev/null | grep -i -E "onnxruntime|aksonocr|opencv|numpy|pillow"
+      - name: Download models
+        shell: bash
+        run: |
+          python -c "from huggingface_hub import snapshot_download as s; s('iapp/OpenThai2.0-OCR-Text', local_dir='model', allow_patterns=['*.onnx','*.yml','config.json','rec_dict.txt','runtime/*','NOTICE','README.md','SHA256SUMS'])"
+          python -c "import aksonocr_lite; aksonocr_lite.load(device='cpu', tables=False); print('akson weights ok')"
+      - name: Benchmark
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUTF8: "1"
+        run: python bench/akson_vs_openthai.py --model model --out bench_out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench_${{ matrix.os }}
+          path: bench_out
