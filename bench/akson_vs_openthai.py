@@ -54,6 +54,13 @@ def fonts():
     for name, p in FONT_CANDIDATES:
         if Path(p).exists():
             out.append((name, p))
+            continue
+        if p.startswith("/usr/share/fonts"):  # Ubuntu แต่ละรุ่นเก็บไว้ต่างที่ (.otf / .ttf)
+            stem = Path(p).stem
+            hit = sorted(Path("/usr/share/fonts").rglob(f"{stem}.*"))
+            hit = [h for h in hit if h.suffix.lower() in (".otf", ".ttf")]
+            if hit:
+                out.append((name, str(hit[0])))
     if not out:
         raise SystemExit("ไม่พบฟอนต์ภาษาไทย")
     return out
