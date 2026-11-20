@@ -1,0 +1,30 @@
+# ตรวจดูไฟล์และวิธีรันของโมเดลบน Hugging Face (พิมพ์ลง log)
+name: Probe HF model
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: HF repo id
+        required: true
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - shell: bash
+        env:
+          REPO: ${{ inputs.repo }}
+        run: |
+          pip -q install huggingface_hub
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi, snapshot_download
+          repo = os.environ["REPO"]
+          info = HfApi().model_info(repo, files_metadata=True)
+          for s in info.siblings:
+              print(f"FILE {s.rfilename} {s.size}")
+          d = snapshot_download(repo, local_dir="m", ignore_patterns=["*.safetensors", "*.gguf", "*.bin", "*.onnx", "*.pt"])
+          PY
+          for f in $(find m -type f \( -name "*.md" -o -name "*.py" -o -name "*.toml" -o -name "*.json" -o -name "*.txt" -o -name "*.jinja" -o -name "*.yaml" \) -size -200k | grep -v -E "tokenizer.json|vocab"); do echo "=================== $f"; cat "$f"; done
